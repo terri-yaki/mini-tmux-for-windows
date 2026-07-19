@@ -11,6 +11,9 @@ tmux itself is written by **Nicholas Marriott** — upstream lives at
 https://github.com/tmux/tmux. This repo only packages his work for Windows;
 all credit for tmux goes to him and the tmux contributors.
 
+It was put together to give [tmux-bridge-mcp](https://github.com/howardpen9/tmux-bridge-mcp)
+a working tmux on Windows — this repo is the runtime, not the MCP server.
+
 ## How it works
 
 `msys-2.0.dll` is the MSYS2 runtime (a Cygwin fork). It gives Windows
@@ -133,15 +136,18 @@ the path inside a session.
 
 ### winpty
 
-Prefix any Windows console program with `winpty` to give it a real
-console inside the pane:
+Intended usage — prefix any Windows console program with `winpty` to give it
+a real console inside the pane:
 
 ```
 winpty cmd
 winpty powershell
 winpty python
-winpty node app.js
 ```
+
+Note: on the machine this was packaged on, winpty currently fails to forward
+output (see **Compatibility** above) — treat this as not-working until a
+fixed winpty or a ConPTY bridge lands.
 
 ### Key bindings (defaults)
 
@@ -227,6 +233,39 @@ Set `MSYS=noglob` in the parent process environment to disable this. If a
 `-F` format ever comes back echoed literally, this is why. (Hit firsthand
 via tmux-bridge-mcp, which feeds brace-heavy `-F` strings through Node's
 `child_process`.)
+
+## Compatibility
+
+Verified on Windows 11 (2026-07), inside tmux panes:
+
+**Works**
+
+- the bundled bash/sh as pane shells
+- Git for Windows userland — `git`, `ssh`, `curl`, `ls`, `grep`, `tar` run
+  fine as spawned children (they are msys-linked but only break as *shells*,
+  see below)
+- one-shot Windows programs — `node -e`, `python -c`, `cmd /c ...`, `ping`,
+  `dotnet`; anything that doesn't need an interactive console
+- tmux itself end to end: panes, `send-keys`, `capture-pane`, labels,
+  scripting — i.e. everything tmux-bridge-mcp drives
+
+**Does not work (for now)**
+
+- **winpty** — prints `stdin is not a tty` and forwards no child output
+  (reproduced inside panes and from Git Bash directly; the agent starts but
+  nothing is scraped back on this Windows build)
+- **interactive Windows TTY apps** as a consequence: full-screen CLIs such as
+  `kimi`, `grok`, or other Ink/React-based tools can't run in panes yet —
+  without winpty they see a pipe (`process.stdout.isTTY` comes back
+  `undefined`) and their UI degrades; with winpty they get no output at all.
+  Non-interactive invocations of the same tools work fine.
+- Git Bash's own `bash.exe`/`sh.exe` **as the pane shell** — msys runtime ABI
+  clash (see next section). The bundled bash has no such problem.
+- WSL — not installed, out of scope.
+
+Getting interactive Windows TUIs working means fixing winpty's pipe-mode
+scraping on current Windows, or replacing it with a ConPTY-based bridge —
+neither is packaged yet.
 
 ## Don't mix runtimes
 
