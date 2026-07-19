@@ -1,11 +1,12 @@
 # mini-tmux-for-windows
 
-tmux 3.6a running natively on Windows. No WSL, no installer, no admin rights.
+tmux 3.7b running natively on Windows. No WSL, no installer, no admin rights.
 
-This is a repackaging of unmodified binaries from the MSYS2 package
+This is a repackaging of binaries from the MSYS2 package
 repositories (https://repo.msys2.org/msys/x86_64/) plus the minimal set of
-runtime libraries they link against. Nothing was compiled or patched for
-this repo; the only hand-written file is `etc/tmux.conf`.
+runtime libraries they link against. The one exception is tmux itself:
+MSYS2 only packages 3.6a, so tmux 3.7b is built here from upstream source
+with one small patch (see **Local patches**).
 
 tmux itself is written by **Nicholas Marriott** — upstream lives at
 https://github.com/tmux/tmux. This repo only packages his work for Windows;
@@ -277,11 +278,13 @@ Calling this tmux *from* Git Bash is fine; that's a separate process.
 
 ## Package manifest
 
-All binaries unmodified from https://repo.msys2.org/msys/x86_64/:
+All binaries unmodified from https://repo.msys2.org/msys/x86_64/ except
+tmux itself:
 
-- tmux-3.6.a-1
+- tmux **3.7b** — built from [upstream source](https://github.com/tmux/tmux/releases/tag/3.7b)
+  (MSYS2 repos are still at 3.6a), with `patches/0001` applied
 - bash-5.3.015-1
-- msys2-runtime-3.6.9-2
+- msys2-runtime-3.6.10-1
 - libevent-2.1.12-4
 - ncurses-6.6-2 (libs + terminfo)
 - libreadline-8.3.003-1
@@ -292,6 +295,16 @@ All binaries unmodified from https://repo.msys2.org/msys/x86_64/:
 winpty is by **Ryan Prichard**: https://github.com/rprichard/winpty
 Runtime and packaging infrastructure: the MSYS2 project,
 https://github.com/msys2
+
+## Local patches
+
+`patches/0001-msys-socket-perm-check.patch` — tmux 3.7 refuses to start
+when the socket directory has any "other" permission bits
+(`TMUX_SOCK_PERM`). Under MSYS2-on-Windows mounts, POSIX modes are faked
+and every directory reports 755, so the check can never pass here. The
+patch skips the mode check under `__MSYS__` but keeps the ownership check;
+the socket dir is still protected by the real mechanism on this platform,
+NTFS ACLs.
 
 ## Uninstall
 

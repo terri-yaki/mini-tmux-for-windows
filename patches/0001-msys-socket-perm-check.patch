@@ -1,0 +1,18 @@
+--- a/tmux.c
++++ b/tmux.c
+@@ -222,7 +222,14 @@
+ 		xasprintf(cause, "%s is not a directory", base);
+ 		goto fail;
+ 	}
+-	if (sb.st_uid != uid || (sb.st_mode & TMUX_SOCK_PERM) != 0) {
++	/* MSYS2 fakes POSIX modes under noacl mounts: every dir reports 755,
++	 * so the o+rwx check can never pass. Ownership is still enforced by
++	 * Windows ACLs, which is the real protection for the socket dir. */
++	if (sb.st_uid != uid
++#ifndef __MSYS__
++	    || (sb.st_mode & TMUX_SOCK_PERM) != 0
++#endif
++	    ) {
+ 		xasprintf(cause, "directory %s has unsafe permissions", base);
+ 		goto fail;
+ 	}
