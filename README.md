@@ -33,7 +33,7 @@ parent, and without it `new-session` dies with "no suitable socket path".
 ## Install
 
 ```
-git clone https://github.com/terri-yaki/mini-tmux-for-windows.git
+git clone https://github.com/terri-yaki/tmux-for-windows.git
 ```
 
 Put the cloned folder anywhere — the layout is self-contained, no fixed
