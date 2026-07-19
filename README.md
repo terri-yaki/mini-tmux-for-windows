@@ -138,21 +138,6 @@ Session config file is `etc\tmux.conf` (read at server start); after
 editing it, `tmux kill-server` and start fresh, or `tmux source-file`
 the path inside a session.
 
-### winpty
-
-Intended usage — prefix any Windows console program with `winpty` to give it
-a real console inside the pane:
-
-```
-winpty cmd
-winpty powershell
-winpty python
-```
-
-Note: on the machine this was packaged on, winpty currently fails to forward
-output (see **Compatibility** above) — treat this as not-working until a
-fixed winpty or a ConPTY bridge lands.
-
 ### Key bindings (defaults)
 
 Prefix is `C-b` (Ctrl-b). After the prefix, tmux listens for one key.
@@ -238,46 +223,29 @@ Set `MSYS=noglob` in the parent process environment to disable this. If a
 via tmux-bridge-mcp, which feeds brace-heavy `-F` strings through Node's
 `child_process`.)
 
-## Compatibility
+## Known limitations
 
-Verified on Windows 11 (2026-07), inside tmux panes:
+- **Interactive Windows-native TTY apps** (e.g. the `kimi` and `grok`
+  CLIs, other Ink/React-based tools) can't run inside panes on current
+  Windows builds — the pipe↔console bridge available for this environment
+  (winpty) is broken on Windows 11, and no ConPTY-based replacement is
+  packaged yet. Non-interactive invocations of the same tools (`node -e`,
+  `python -c`, `cmd /c …`, `git`, `ssh`, `curl`) work fine — as does
+  everything tmux itself does.
+- **Panes must use the bundled bash.** Git for Windows binaries are not
+  usable as the pane shell (the server execs the shell into an existing
+  process, and the two msys runtimes are ABI-incompatible).
+- **`-F '#{...}'` format arguments get brace-stripped when issued from a
+  Git Bash shell** (Git for Windows expands `{...}` when building the
+  Windows command line for a foreign-runtime child; there is no switch to
+  turn it off). Use formats inside panes, or via tmux-bridge-mcp with
+  `MSYS=noglob`. For deterministic bundled-runtime panes, start the server
+  without Git's runtime dirs in PATH, e.g.:
 
-**Works**
-
-- the bundled bash/sh as pane shells
-- Git for Windows userland — `git`, `ssh`, `curl`, `ls`, `grep`, `tar` run
-  fine as spawned children (they are msys-linked but only break as *shells*,
-  see below)
-- one-shot Windows programs — `node -e`, `python -c`, `cmd /c ...`, `ping`,
-  `dotnet`; anything that doesn't need an interactive console
-- tmux itself end to end: panes, `send-keys`, `capture-pane`, labels,
-  scripting — i.e. everything tmux-bridge-mcp drives
-
-**Does not work (for now)**
-
-- **winpty** — prints `stdin is not a tty` and forwards no child output
-  (reproduced inside panes and from Git Bash directly; the agent starts but
-  nothing is scraped back on this Windows build)
-- **interactive Windows TTY apps** as a consequence: full-screen CLIs such as
-  `kimi`, `grok`, or other Ink/React-based tools can't run in panes yet —
-  without winpty they see a pipe (`process.stdout.isTTY` comes back
-  `undefined`) and their UI degrades; with winpty they get no output at all.
-  Non-interactive invocations of the same tools work fine.
-- Git Bash's own `bash.exe`/`sh.exe` **as the pane shell** — msys runtime ABI
-  clash (see next section). The bundled bash has no such problem.
-- WSL — not installed, out of scope.
-
-Getting interactive Windows TUIs working means fixing winpty's pipe-mode
-scraping on current Windows, or replacing it with a ConPTY-based bridge —
-neither is packaged yet.
-
-## Don't mix runtimes
-
-Git for Windows ships its own fork of the msys runtime, ABI-incompatible
-with upstream MSYS2's. A pane (which already has MSYS2's runtime mapped)
-cannot exec Git Bash's `bash.exe` — the child keeps the loaded runtime and
-the mismatched binary dies on startup. Use the bundled bash inside panes.
-Calling this tmux *from* Git Bash is fine; that's a separate process.
+  ```
+  PATH="/d/workspace/mini-tmux-for-windows/usr/bin:/c/WINDOWS/system32:/c/WINDOWS" \
+    tmux new-session -d -s main
+  ```
 
 ## Package manifest
 
@@ -331,31 +299,6 @@ What's deliberately left out compared to a full MSYS2/Linux install:
 Validated with `tests/validate.sh` (40 checks across sessions, windows,
 panes, input/output, buffers, hooks, formats, options) — all passing on
 Windows 11.
-
-## Runtime coexistence with Git Bash
-
-Git for Windows ships its own ABI-incompatible fork of the msys runtime,
-and every Git Bash process has it in PATH. Practical consequences found
-during bring-up:
-
-- a pane spawned while Git's runtime is reachable may load *Git's* runtime
-  instead of the bundled one. Both work as shells, but a tmux client
-  spawned from a Git-runtime shell gets its `-F '#{...}'` format arguments
-  brace-stripped by Git's argument conversion (Git for Windows expands
-  `{...}` when building the Windows command line for a foreign-runtime
-  child; there is no switch to turn it off).
-- to get deterministic bundled-runtime panes, start the server with Git's
-  runtime dirs removed from PATH, e.g.:
-
-  ```
-  PATH="/d/workspace/mini-tmux-for-windows/usr/bin:/c/WINDOWS/system32:/c/WINDOWS" \
-    tmux new-session -d -s main
-  ```
-
-  (the `agents` launcher does this for you)
-- Node/PowerShell-spawned clients (e.g. tmux-bridge-mcp) always load the
-  bundled runtime via `exe.local`; combine with `MSYS=noglob` and formats
-  expand correctly.
 
 ## Local patches
 
