@@ -1,4 +1,4 @@
-# tmux-for-windows
+# mini-tmux-for-windows
 
 tmux 3.6a running natively on Windows. No WSL, no installer, no admin rights.
 
