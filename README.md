@@ -32,8 +32,14 @@ parent, and without it `new-session` dies with "no suitable socket path".
 
 ## Install
 
-Clone, then add `<root>\usr\bin` to the user PATH. Open a new terminal
-afterwards — PATH changes don't propagate to already-running processes.
+```
+git clone https://github.com/terri-yaki/mini-tmux-for-windows.git
+```
+
+Put the cloned folder anywhere — the layout is self-contained, no fixed
+location required. Then add its `usr\bin` directory to the user PATH and
+open a new terminal (PATH changes don't reach already-running processes).
+Verify with `tmux -V`.
 
 ## User guide
 
