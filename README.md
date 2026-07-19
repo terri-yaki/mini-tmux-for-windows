@@ -19,7 +19,10 @@ a working tmux on Windows — this repo is the runtime, not the MCP server.
 
 `msys-2.0.dll` is the MSYS2 runtime (a Cygwin fork). It gives Windows
 processes the POSIX layer tmux needs: `fork()`, pseudo-terminals, and unix
-domain sockets. The runtime locates its install root from its own DLL path,
+domain sockets. Note that upstream tmux is not a library — it's a
+client/server application distributed as C source, which is why this repo
+ships a compiled binary plus the runtime it depends on, rather than an
+installer. The runtime locates its install root from its own DLL path,
 which is why the directory layout is fixed and the folder is relocatable:
 
 ```
@@ -290,11 +293,69 @@ tmux itself:
 - libreadline-8.3.003-1
 - libintl-0.22.5-1
 - libiconv-1.19-1
+- coreutils-8.32-5, sed-4.9-1, grep-3.0, gawk-5.4.1-1, diffutils-3.12-1,
+  findutils-4.10.0-3, gzip-1.14-2, tar-1.35-3 — pane userland
+- libpcre-8.45-5, mpfr-4.2.2-1, gmp-6.3.0-2 (gawk/grep deps)
 - winpty-0.4.3-3
 
 winpty is by **Ryan Prichard**: https://github.com/rprichard/winpty
 Runtime and packaging infrastructure: the MSYS2 project,
 https://github.com/msys2
+
+### Runtime DLL details
+
+The bundled `msys-*.dll`s are **rebased** into the `0x230000000`+ range
+(stock MSYS2 dlls all want `0x210040000`, colliding with Git for Windows'
+runtime; the collision made the bundled runtime fail to initialize
+intermittently). Each `.exe` in `usr\bin` also has a sibling
+`<name>.exe.local` file, which forces Windows to prefer DLLs from the
+executable's own directory over any other msys runtime on the PATH.
+
+## Bundled vs a full tmux install
+
+What you get is the complete tmux 3.7b binary — sessions, windows, panes,
+copy-mode, paste buffers, hooks, format strings, control mode, 256-color
+and UTF-8 — plus a working shell environment (bash 5.3, coreutils, grep,
+sed, awk, find, tar, gzip) and `etc/tmux.conf` presets.
+
+What's deliberately left out compared to a full MSYS2/Linux install:
+
+- man pages — use https://man.openbsd.org/tmux
+- bash-completion and shell integration scripts
+- example tmux.conf files from `/usr/share/tmux/`
+- `utf8proc` (built without it; exotic Unicode width handling, basic
+  CJK/emoji is fine)
+- utempter/utmpx accounting (doesn't exist on Windows anyway)
+- a compiler/toolchain — this repo is runtime-only
+
+Validated with `tests/validate.sh` (40 checks across sessions, windows,
+panes, input/output, buffers, hooks, formats, options) — all passing on
+Windows 11.
+
+## Runtime coexistence with Git Bash
+
+Git for Windows ships its own ABI-incompatible fork of the msys runtime,
+and every Git Bash process has it in PATH. Practical consequences found
+during bring-up:
+
+- a pane spawned while Git's runtime is reachable may load *Git's* runtime
+  instead of the bundled one. Both work as shells, but a tmux client
+  spawned from a Git-runtime shell gets its `-F '#{...}'` format arguments
+  brace-stripped by Git's argument conversion (Git for Windows expands
+  `{...}` when building the Windows command line for a foreign-runtime
+  child; there is no switch to turn it off).
+- to get deterministic bundled-runtime panes, start the server with Git's
+  runtime dirs removed from PATH, e.g.:
+
+  ```
+  PATH="/d/workspace/mini-tmux-for-windows/usr/bin:/c/WINDOWS/system32:/c/WINDOWS" \
+    tmux new-session -d -s main
+  ```
+
+  (the `agents` launcher does this for you)
+- Node/PowerShell-spawned clients (e.g. tmux-bridge-mcp) always load the
+  bundled runtime via `exe.local`; combine with `MSYS=noglob` and formats
+  expand correctly.
 
 ## Local patches
 
