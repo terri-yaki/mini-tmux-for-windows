@@ -16,8 +16,8 @@ if (-not (Test-Path -Path $TmpDir)) {
     [void](New-Item -ItemType Directory -Path $TmpDir -Force)
 }
 
-# Preserve #{...} format braces across non-MSYS process boundaries
-$env:MSYS = 'noglob'
+# Preserve #{...} format braces across non-MSYS process boundaries & optimize POSIX runtime
+$env:MSYS = 'noglob disable_pcon winsymlinks:nativestrict'
 $env:LANG = 'en_US.UTF-8'
 $env:LC_ALL = 'en_US.UTF-8'
 

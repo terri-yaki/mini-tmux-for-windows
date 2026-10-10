@@ -11,7 +11,8 @@ if not exist "%MINITMUX_ROOT%\tmp" (
 )
 
 :: Prevent MSYS runtime from stripping #{format} braces on Windows command lines
-set "MSYS=noglob"
+:: and enable optimized POSIX process spawning and symlink handling
+set "MSYS=noglob disable_pcon winsymlinks:nativestrict"
 
 :: Ensure UTF-8 locale and code page for console output and CJK/Unicode
 set "LANG=en_US.UTF-8"

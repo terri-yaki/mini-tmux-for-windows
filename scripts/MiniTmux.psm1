@@ -10,8 +10,8 @@ $Script:MiniTmuxRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCo
 $Script:TmuxExe = Join-Path $Script:MiniTmuxRoot 'usr\bin\tmux.exe'
 $Script:MtmuxPs1 = Join-Path $Script:MiniTmuxRoot 'bin\mtmux.ps1'
 
-# Ensure noglob is set for all sessions
-$env:MSYS = 'noglob'
+# Ensure noglob and high-performance runtime flags are set
+$env:MSYS = 'noglob disable_pcon winsymlinks:nativestrict'
 
 function Get-MiniTmuxSession {
     [CmdletBinding()]

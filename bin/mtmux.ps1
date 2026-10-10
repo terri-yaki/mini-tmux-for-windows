@@ -17,7 +17,7 @@ if (-not (Test-Path -Path $TmpDir)) {
     [void](New-Item -ItemType Directory -Path $TmpDir -Force)
 }
 
-$env:MSYS = 'noglob'
+$env:MSYS = 'noglob disable_pcon winsymlinks:nativestrict'
 $env:LANG = 'en_US.UTF-8'
 $env:LC_ALL = 'en_US.UTF-8'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -175,6 +175,12 @@ function Show-Doctor {
         Write-Host "  PASS  Windows clip.exe detected at $clipExe" -ForegroundColor Green
     } else {
         Write-Host "  WARN  clip.exe not found in System32" -ForegroundColor Yellow
+    }
+    $winpasteExe = Join-Path $RootDir "usr\bin\winpaste.exe"
+    if (Test-Path $winpasteExe) {
+        Write-Host "  PASS  Native fast-paste winpaste.exe detected at $winpasteExe" -ForegroundColor Green
+    } else {
+        Write-Host "  WARN  winpaste.exe not found in usr\bin" -ForegroundColor Yellow
     }
 
     # 7. Windows Terminal & Shell Integration
