@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    MiniTmux Automated Windows-Host Test Suite.
+    MiniTmux Automated Windows-Host Test Suite (Performance-Optimized).
 .DESCRIPTION
     Executes end-to-end verification of MiniTmux directly from native Windows PowerShell.
     Validates wrappers, noglob handling, session lifecycles, layouts, UTF-8, and path translations.
@@ -37,14 +37,30 @@ function Assert-Check {
     }
 }
 
+function Wait-Condition {
+    param(
+        [scriptblock]$Predicate,
+        [int]$TimeoutMs = 1500,
+        [int]$IntervalMs = 25
+    )
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.ElapsedMilliseconds -lt $TimeoutMs) {
+        if (& $Predicate) { return $true }
+        Start-Sleep -Milliseconds $IntervalMs
+    }
+    return $false
+}
+
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "            MiniTmux Windows Verification Test Suite            " -ForegroundColor White
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host "Testing MiniTmux Root: $RootDir`n" -ForegroundColor Gray
 
+$swSuite = [System.Diagnostics.Stopwatch]::StartNew()
+
 # Ensure server is clean before starting
 & $TmuxPs1 kill-server 2>$null
-Start-Sleep -Milliseconds 400
+[void](Wait-Condition { -not (Get-Process -Name "*tmux*" -ErrorAction SilentlyContinue) } 500)
 
 # -----------------------------------------------------------------------------
 # 1. Binary & Wrapper Sanity
@@ -134,19 +150,22 @@ Assert-Check "Agents layout pane 2 labeled worker-2" ($w2Role -match 'worker-2')
 Write-Host "`n[Group 6] Input / Output Execution & UTF-8" -ForegroundColor Yellow
 
 & $MtmuxPs1 new io_sess -d
-Start-Sleep -Milliseconds 400
+[void](Wait-Condition { (& $TmuxPs1 has-session -t io_sess 2>$null); $LASTEXITCODE -eq 0 } 500)
 
 & $MtmuxPs1 run io_sess:0.0 "echo MINI_TMUX_TOKEN_789"
-Start-Sleep -Milliseconds 600
-
-$captured = (& $MtmuxPs1 capture io_sess:0.0 -n 15 2>&1) | Out-String
-Assert-Check "mtmux run and capture read back executed command" ($captured -match 'MINI_TMUX_TOKEN_789') "Output: $captured"
+$capOk = Wait-Condition {
+    $out = (& $MtmuxPs1 capture io_sess:0.0 -n 10 2>&1) | Out-String
+    $out -match 'MINI_TMUX_TOKEN_789'
+} 1500
+Assert-Check "mtmux run and capture read back executed command" $capOk
 
 # UTF-8 Roundtrip
 & $MtmuxPs1 run io_sess:0.0 "echo UTF8_ROUNDTRIP_OK"
-Start-Sleep -Milliseconds 600
-$utf8Cap = (& $MtmuxPs1 capture io_sess:0.0 -n 15 2>&1) | Out-String
-Assert-Check "Terminal input/output command roundtrip" ($utf8Cap -match 'UTF8_ROUNDTRIP_OK') "Output: $utf8Cap"
+$utf8Ok = Wait-Condition {
+    $out = (& $MtmuxPs1 capture io_sess:0.0 -n 10 2>&1) | Out-String
+    $out -match 'UTF8_ROUNDTRIP_OK'
+} 1500
+Assert-Check "Terminal input/output command roundtrip" $utf8Ok
 
 & $MtmuxPs1 kill io_sess
 
@@ -156,31 +175,35 @@ Assert-Check "Terminal input/output command roundtrip" ($utf8Cap -match 'UTF8_RO
 Write-Host "`n[Group 7] Path Translation & Teardown" -ForegroundColor Yellow
 
 & $MtmuxPs1 new path_sess -d -c "$RootDir"
-Start-Sleep -Milliseconds 400
+[void](Wait-Condition { (& $TmuxPs1 has-session -t path_sess 2>$null); $LASTEXITCODE -eq 0 } 500)
 
 & $MtmuxPs1 run path_sess:0.0 "pwd"
-Start-Sleep -Milliseconds 600
-
-$panePath = (& $MtmuxPs1 capture path_sess:0.0 -n 10 2>&1) | Out-String
-Assert-Check "Windows working directory translated to POSIX /cygdrive" ($panePath -match '/cygdrive/.*mini-tmux-for-windows') "Got path: $panePath"
+$pathOk = Wait-Condition {
+    $out = (& $MtmuxPs1 capture path_sess:0.0 -n 10 2>&1) | Out-String
+    $out -match '/cygdrive/.*mini-tmux-for-windows'
+} 1500
+Assert-Check "Windows working directory translated to POSIX /cygdrive" $pathOk
 
 & $MtmuxPs1 kill --all
-Start-Sleep -Milliseconds 300
+[void](Wait-Condition { -not (Get-Process -Name "*tmux*" -ErrorAction SilentlyContinue) } 500)
 
 $deadCheck = (& $TmuxPs1 list-sessions 2>&1) | Out-String
 Assert-Check "Server clean shutdown with no surviving sessions" ($deadCheck -match 'no server running' -or $LASTEXITCODE -ne 0)
 
 # -----------------------------------------------------------------------------
-# Test Summary
+# Test Summary & Benchmark Timing
 # -----------------------------------------------------------------------------
+$swSuite.Stop()
+$elapsed = [math]::Round($swSuite.Elapsed.TotalSeconds, 2)
+
 Write-Host "`n================================================================" -ForegroundColor Cyan
 $total = $Script:PassCount + $Script:FailCount
 if ($Script:FailCount -eq 0) {
-    Write-Host "ALL TESTS PASSED: $Script:PassCount / $total checks passed." -ForegroundColor Green
+    Write-Host "ALL TESTS PASSED: $Script:PassCount / $total checks passed in $elapsed seconds!" -ForegroundColor Green
     Write-Host "================================================================`n" -ForegroundColor Cyan
     exit 0
 } else {
-    Write-Host "TESTS COMPLETED WITH FAILURES: $Script:PassCount passed, $Script:FailCount failed." -ForegroundColor Red
+    Write-Host "TESTS COMPLETED WITH FAILURES: $Script:PassCount passed, $Script:FailCount failed ($elapsed s)." -ForegroundColor Red
     Write-Host "================================================================`n" -ForegroundColor Cyan
     exit 1
 }

@@ -4,7 +4,7 @@
 #   PATH="/d/workspace/mini-tmux-for-windows/usr/bin:/c/WINDOWS/system32:/c/WINDOWS" #   tmux -L validate new-session -d -s main -x 220 -y 50
 # then, inside that session's pane:
 #   bash /tmp/validate.sh
-export PATH="/cygdrive/d/workspace/mini-tmux-for-windows/usr/bin:$PATH"
+export PATH="/usr/bin:/d/workspace/mini-tmux-for-windows/usr/bin:$PATH"
 TMUX="tmux -L validate"
 PASS=0; FAIL=0
 
