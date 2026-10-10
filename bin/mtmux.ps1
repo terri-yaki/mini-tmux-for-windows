@@ -57,8 +57,11 @@ USAGE:
     mtmux list | ls           List running sessions with detailed status
     mtmux kill [name|--all]   Terminate a session or kill the entire server
     mtmux layout <preset>     Launch or configure a structured layout (dev, split, quad, agents)
-    mtmux run <target> <cmd>  Send a command to a pane and execute it
+    mtmux run <target> <cmd>  Send a command to a pane and execute it (auto Enter; -n for raw keys)
     mtmux capture <target>    Capture and print visible pane content
+    mtmux save [file]         Export running sessions, windows & layouts to snapshot file
+    mtmux restore [file]      Restore sessions, windows & pane layouts from snapshot file
+    mtmux theme [name|list]   List or switch visual color theme (catppuccin-mocha, tokyo-night, nord, etc.)
     mtmux doctor              Run comprehensive health, runtime, and collision diagnostics
     mtmux setup               Add MiniTmux to User PATH and register Windows Terminal profile
     mtmux wt [session]        Launch MiniTmux in a new tab inside Windows Terminal
@@ -71,9 +74,15 @@ LAYOUT PRESETS:
     quad     Balanced 2x2 grid (4 panes)
     agents   3-pane multi-agent orchestration layout (Coordinator + 2 Worker panes)
 
+THEMES:
+    catppuccin-mocha, tokyo-night, nord, gruvbox-dark, dracula, one-dark
+
 EXAMPLES:
     mtmux
     mtmux new dev-session
+    mtmux save
+    mtmux restore
+    mtmux theme tokyo-night
     mtmux layout agents -Name ai-team
     mtmux run ai-team:0.0 "git status"
     mtmux capture ai-team:0.0
@@ -327,6 +336,206 @@ function Setup-PathAndTerminal {
     }
 }
 
+function Save-Sessions {
+    param([string]$FilePath)
+
+    $targetFile = if ($FilePath) { $FilePath } else { Join-Path $TmpDir 'saved_sessions.json' }
+    
+    # Query all sessions, windows, and panes
+    $raw = & $TmuxExe list-panes -a -F "#{session_name}|#{window_index}|#{window_name}|#{window_layout}|#{pane_index}|#{pane_current_path}|#{pane_pid}" 2>$null
+    if (-not $raw) {
+        Write-Host "No active sessions found to save." -ForegroundColor Yellow
+        return
+    }
+
+    $sessionsHash = @{}
+    foreach ($line in $raw) {
+        $parts = $line -split '\|'
+        if ($parts.Count -lt 6) { continue }
+        $sName = $parts[0]
+        $wIdx  = [int]$parts[1]
+        $wName = $parts[2]
+        $wLayout = $parts[3]
+        $pIdx  = [int]$parts[4]
+        $pPath = $parts[5]
+
+        if (-not $sessionsHash.ContainsKey($sName)) {
+            $sessionsHash[$sName] = @{
+                Name = $sName
+                Windows = @{}
+            }
+        }
+        $sess = $sessionsHash[$sName]
+        if (-not $sess.Windows.ContainsKey($wIdx)) {
+            $sess.Windows[$wIdx] = @{
+                Index = $wIdx
+                Name = $wName
+                Layout = $wLayout
+                Panes = @()
+            }
+        }
+        $sess.Windows[$wIdx].Panes += @{
+            Index = $pIdx
+            Path = $pPath
+        }
+    }
+
+    $sessionList = @()
+    foreach ($sKey in $sessionsHash.Keys) {
+        $sess = $sessionsHash[$sKey]
+        $winList = @()
+        foreach ($wKey in ($sess.Windows.Keys | Sort-Object)) {
+            $w = $sess.Windows[$wKey]
+            $winList += [PSCustomObject]@{
+                Index = $w.Index
+                Name = $w.Name
+                Layout = $w.Layout
+                Panes = $w.Panes
+            }
+        }
+        $sessionList += [PSCustomObject]@{
+            Name = $sess.Name
+            Windows = $winList
+        }
+    }
+
+    $exportData = [PSCustomObject]@{
+        Version = 1
+        SavedAt = (Get-Date).ToString("o")
+        Sessions = $sessionList
+    }
+
+    $json = $exportData | ConvertTo-Json -Depth 5
+    [System.IO.File]::WriteAllText($targetFile, $json, [System.Text.Encoding]::UTF8)
+
+    Write-Host "  PASS  Saved $(@($sessionList).Count) session(s) snapshot to: $targetFile" -ForegroundColor Green
+}
+
+function Restore-Sessions {
+    param([string]$FilePath)
+
+    $targetFile = if ($FilePath) { $FilePath } else { Join-Path $TmpDir 'saved_sessions.json' }
+    if (-not (Test-Path $targetFile)) {
+        Write-Host "Snapshot file not found: $targetFile" -ForegroundColor Red
+        return
+    }
+
+    $content = [System.IO.File]::ReadAllText($targetFile, [System.Text.Encoding]::UTF8)
+    $data = $content | ConvertFrom-Json
+
+    if (-not $data.Sessions) {
+        Write-Host "No sessions found in snapshot." -ForegroundColor Yellow
+        return
+    }
+
+    $restoredCount = 0
+    foreach ($sess in $data.Sessions) {
+        $sName = $sess.Name
+        Write-Host "Restoring session '$sName'..." -ForegroundColor Cyan
+
+        & $TmuxExe has-session -t $sName 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  WARN  Session '$sName' already running. Skipping." -ForegroundColor Yellow
+            continue
+        }
+
+        $firstWin = $sess.Windows[0]
+        $firstPath = if ($firstWin.Panes.Count -gt 0) { $firstWin.Panes[0].Path } else { "" }
+        
+        $newArgs = @("new-session", "-d", "-s", $sName, "-n", $firstWin.Name)
+        if ($firstPath) { $newArgs += @("-c", $firstPath) }
+        & $TmuxExe @newArgs
+
+        # Restore first window's additional panes and layout
+        if ($firstWin.Panes.Count -gt 1) {
+            for ($p = 1; $p -lt $firstWin.Panes.Count; $p++) {
+                $panePath = $firstWin.Panes[$p].Path
+                $splitArgs = @("split-window", "-t", "$($sName):$($firstWin.Index)")
+                if ($panePath) { $splitArgs += @("-c", $panePath) }
+                & $TmuxExe @splitArgs
+            }
+        }
+        if ($firstWin.Layout) {
+            & $TmuxExe select-layout -t "$($sName):$($firstWin.Index)" $firstWin.Layout 2>$null
+        }
+
+        # Restore subsequent windows
+        for ($w = 1; $w -lt $sess.Windows.Count; $w++) {
+            $win = $sess.Windows[$w]
+            $wPath = if ($win.Panes.Count -gt 0) { $win.Panes[0].Path } else { "" }
+            $winArgs = @("new-window", "-d", "-t", "$($sName):$($win.Index)", "-n", $win.Name)
+            if ($wPath) { $winArgs += @("-c", $wPath) }
+            & $TmuxExe @winArgs
+
+            if ($win.Panes.Count -gt 1) {
+                for ($p = 1; $p -lt $win.Panes.Count; $p++) {
+                    $panePath = $win.Panes[$p].Path
+                    $splitArgs = @("split-window", "-t", "$($sName):$($win.Index)")
+                    if ($panePath) { $splitArgs += @("-c", $panePath) }
+                    & $TmuxExe @splitArgs
+                }
+            }
+            if ($win.Layout) {
+                & $TmuxExe select-layout -t "$($sName):$($win.Index)" $win.Layout 2>$null
+            }
+        }
+        $restoredCount++
+        Write-Host "  PASS  Restored session '$sName' ($($sess.Windows.Count) windows)" -ForegroundColor Green
+    }
+    Write-Host "Successfully restored $restoredCount session(s)." -ForegroundColor Green
+}
+
+function Get-AvailableThemes {
+    $themeDir = Join-Path $RootDir 'etc\themes'
+    if (-not (Test-Path $themeDir)) { return @() }
+    $files = Get-ChildItem -Path $themeDir -Filter "*.conf" | Where-Object { $_.BaseName -ne 'current' }
+    return ($files | ForEach-Object { $_.BaseName })
+}
+
+function Show-Themes {
+    $themes = Get-AvailableThemes
+    $currentFile = Join-Path $RootDir 'etc\themes\current.conf'
+    $currentHash = if (Test-Path $currentFile) { (Get-FileHash $currentFile -Algorithm SHA256).Hash } else { "" }
+
+    Write-Host "`nMiniTmux Available Visual Themes:" -ForegroundColor Cyan
+    foreach ($th in $themes) {
+        $thFile = Join-Path $RootDir "etc\themes\$th.conf"
+        $thHash = (Get-FileHash $thFile -Algorithm SHA256).Hash
+        if ($thHash -eq $currentHash) {
+            Write-Host "  * $th  (active)" -ForegroundColor Green
+        } else {
+            Write-Host "    $th" -ForegroundColor Gray
+        }
+    }
+    Write-Host "`nTo switch theme: mtmux theme <name>`n" -ForegroundColor DarkCyan
+}
+
+function Set-Theme {
+    param([string]$ThemeName)
+
+    if ([string]::IsNullOrWhiteSpace($ThemeName) -or $ThemeName -eq "list") {
+        Show-Themes
+        return
+    }
+
+    $themeFile = Join-Path $RootDir "etc\themes\$ThemeName.conf"
+    if (-not (Test-Path $themeFile)) {
+        Write-Host "Unknown theme '$ThemeName'." -ForegroundColor Red
+        Show-Themes
+        return
+    }
+
+    $currentFile = Join-Path $RootDir 'etc\themes\current.conf'
+    Copy-Item -Path $themeFile -Destination $currentFile -Force
+    
+    # Reload tmux live if server is running
+    & $TmuxExe has-session 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        & $TmuxExe source-file (Convert-ToPosixPath $currentFile) 2>$null
+    }
+    Write-Host "  PASS  Applied theme '$ThemeName'." -ForegroundColor Green
+}
+
 # --- Main Dispatcher ---
 
 $action = if ($args.Count -gt 0) { $args[0].ToLower() } else { "default" }
@@ -416,15 +625,38 @@ switch ($action) {
         }
         Setup-Layout -Preset $preset -SessionName $sess
     }
+    'save' {
+        $file = if ($args.Count -gt 1) { $args[1] } else { $null }
+        Save-Sessions -FilePath $file
+    }
+    'restore' {
+        $file = if ($args.Count -gt 1) { $args[1] } else { $null }
+        Restore-Sessions -FilePath $file
+    }
+    'theme' {
+        $th = if ($args.Count -gt 1) { $args[1] } else { "list" }
+        Set-Theme -ThemeName $th
+    }
+    'themes' {
+        Show-Themes
+    }
     'run' {
         if ($args.Count -lt 3) {
-            Write-Host "Usage: mtmux run <target> <command>" -ForegroundColor Yellow
+            Write-Host "Usage: mtmux run <target> [--no-enter|-n] <command>" -ForegroundColor Yellow
             return
         }
         $target = $args[1]
-        $command = ($args[2..($args.Count - 1)]) -join ' '
+        $noEnter = $false
+        $cmdIndex = 2
+        if ($args[2] -eq "--no-enter" -or $args[2] -eq "-n") {
+            $noEnter = $true
+            $cmdIndex = 3
+        }
+        $command = ($args[$cmdIndex..($args.Count - 1)]) -join ' '
         & $TmuxExe send-keys -t $target -l $command
-        & $TmuxExe send-keys -t $target Enter
+        if (-not $noEnter) {
+            & $TmuxExe send-keys -t $target Enter
+        }
     }
     'capture' {
         if ($args.Count -lt 2) {

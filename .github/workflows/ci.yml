@@ -1,0 +1,40 @@
+name: CI & Automated Verification
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-windows:
+    name: Windows Host Verification
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Core Binaries & Layout
+        shell: pwsh
+        run: |
+          ./bin/mtmux.ps1 doctor
+
+      - name: Run Windows Host Automated Test Suite
+        shell: pwsh
+        run: |
+          ./tests/Test-MiniTmux.ps1
+
+      - name: Verify Packaging Script
+        shell: pwsh
+        run: |
+          ./scripts/Package-MiniTmux.ps1 -OutputDir ./dist
+
+      - name: Upload Distribution Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mini-tmux-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256

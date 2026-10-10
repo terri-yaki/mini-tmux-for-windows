@@ -28,10 +28,76 @@ if "%SUBCMD%"=="" (
     exit /b %ERRORLEVEL%
 )
 
-:: Fast-path 2: list / ls
+:: Fast-path 2: new
+if /i "%SUBCMD%"=="new" goto :do_new
+
+:: Fast-path 3: list / ls
 if /i "%SUBCMD%"=="ls" goto :do_list
 if /i "%SUBCMD%"=="list" goto :do_list
-goto :check_attach
+
+:: Fast-path 4: attach / a
+if /i "%SUBCMD%"=="attach" goto :do_attach
+if /i "%SUBCMD%"=="a" goto :do_attach
+
+:: Fast-path 5: kill
+if /i "%SUBCMD%"=="kill" goto :do_kill
+
+:: Fast-path 6: theme (fast-path switcher)
+if /i "%SUBCMD%"=="theme" goto :do_theme
+
+:: Fast-path 7: run <target> [--no-enter|-n] <command>
+if /i "%SUBCMD%"=="run" goto :do_run
+
+:: Fast-path 8: capture <target>
+if /i "%SUBCMD%"=="capture" goto :do_capture
+
+:: Fast-path 9: raw forwarding '--'
+if "%SUBCMD%"=="--" (
+    shift
+    "%TMUX_EXE%" -u %1 %2 %3 %4 %5 %6 %7 %8 %9
+    exit /b %ERRORLEVEL%
+)
+
+:: Fall back to PowerShell for rich features (doctor, setup, layout presets, save/restore, etc.)
+:fallback_ps
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%MINITMUX_ROOT%\bin\mtmux.ps1" %*
+exit /b %ERRORLEVEL%
+
+:do_new
+set "NEW_SESS=%~2"
+set "NEW_DETACHED=0"
+if "%NEW_SESS%"=="" set "NEW_SESS=main"
+if "%NEW_SESS%"=="-d" (
+    set "NEW_DETACHED=1"
+    set "NEW_SESS=%~3"
+    if "!NEW_SESS!"=="" set "NEW_SESS=main"
+) else if "%NEW_SESS%"=="--detached" (
+    set "NEW_DETACHED=1"
+    set "NEW_SESS=%~3"
+    if "!NEW_SESS!"=="" set "NEW_SESS=main"
+) else if "%~3"=="-d" (
+    set "NEW_DETACHED=1"
+) else if "%~3"=="--detached" (
+    set "NEW_DETACHED=1"
+)
+:: If caller supplied custom directory flags (-c), defer to PowerShell for path translation
+if "%~2"=="-c" goto :fallback_ps
+if "%~3"=="-c" goto :fallback_ps
+if "%~4"=="-c" goto :fallback_ps
+
+if "!NEW_DETACHED!"=="1" (
+    "%TMUX_EXE%" -u new-session -d -s "!NEW_SESS!"
+    echo Created detached session '!NEW_SESS!'.
+    exit /b 0
+)
+"%TMUX_EXE%" -u has-session -t "!NEW_SESS!" >nul 2>&1
+if not errorlevel 1 (
+    echo Session '!NEW_SESS!' already exists. Attaching...
+    "%TMUX_EXE%" -u attach-session -t "!NEW_SESS!"
+    exit /b %ERRORLEVEL%
+)
+"%TMUX_EXE%" -u new-session -s "!NEW_SESS!"
+exit /b %ERRORLEVEL%
 
 :do_list
 "%TMUX_EXE%" -u list-sessions -F "#{session_name}: #{session_windows} windows (created #{session_created_string}) #{?session_attached,[attached],[detached]}" 2>nul
@@ -40,75 +106,81 @@ if errorlevel 1 (
 )
 exit /b 0
 
-:check_attach
-:: Fast-path 3: attach / a
-if /i "%SUBCMD%"=="attach" goto :do_attach
-if /i "%SUBCMD%"=="a" goto :do_attach
-goto :check_kill
-
 :do_attach
 set "SESS=%~2"
 if "!SESS!"=="" set "SESS=main"
 "%TMUX_EXE%" -u attach-session -t "!SESS!"
 exit /b %ERRORLEVEL%
 
-:check_kill
-:: Fast-path 4: kill
-if /i "%SUBCMD%"=="kill" (
-    if "%~2"=="--all" (
-        "%TMUX_EXE%" -u kill-server
-        echo MiniTmux server and all sessions terminated.
-        exit /b 0
-    )
-    if "%~2"=="-a" (
-        "%TMUX_EXE%" -u kill-server
-        echo MiniTmux server and all sessions terminated.
-        exit /b 0
-    )
-    set "SESS=%~2"
-    if "!SESS!"=="" set "SESS=main"
-    "%TMUX_EXE%" -u kill-session -t "!SESS!"
-    echo Killed session '!SESS!'.
+:do_kill
+if "%~2"=="--all" (
+    "%TMUX_EXE%" -u kill-server
+    echo MiniTmux server and all sessions terminated.
     exit /b 0
 )
+if "%~2"=="-a" (
+    "%TMUX_EXE%" -u kill-server
+    echo MiniTmux server and all sessions terminated.
+    exit /b 0
+)
+set "SESS=%~2"
+if "!SESS!"=="" set "SESS=main"
+"%TMUX_EXE%" -u kill-session -t "!SESS!"
+echo Killed session '!SESS!'.
+exit /b 0
 
-:: Fast-path 5: run <target> <command>
-if /i "%SUBCMD%"=="run" (
-    set "TARGET=%~2"
-    shift
-    shift
-    set "CMD_TEXT="
-    :run_loop
-    if "%~1"=="" goto :run_exec
-    if "!CMD_TEXT!"=="" (
-        set "CMD_TEXT=%~1"
-    ) else (
-        set "CMD_TEXT=!CMD_TEXT! %~1"
+:do_theme
+set "THEME_NAME=%~2"
+if "!THEME_NAME!"=="" goto :fallback_ps
+if /i "!THEME_NAME!"=="list" goto :fallback_ps
+set "THEME_FILE=%MINITMUX_ROOT%\etc\themes\!THEME_NAME!.conf"
+if not exist "!THEME_FILE!" (
+    echo Unknown theme '!THEME_NAME!'. Available themes:
+    for %%f in ("%MINITMUX_ROOT%\etc\themes\*.conf") do (
+        if not "%%~nf"=="current" echo   - %%~nf
     )
+    exit /b 1
+)
+copy /y "!THEME_FILE!" "%MINITMUX_ROOT%\etc\themes\current.conf" >nul
+"%TMUX_EXE%" -u has-session >nul 2>&1
+if not errorlevel 1 (
+    "%TMUX_EXE%" -u source-file "%MINITMUX_ROOT%\etc\themes\current.conf" 2>nul
+)
+echo Applied theme '!THEME_NAME!'.
+exit /b 0
+
+:do_run
+set "TARGET=%~2"
+shift
+shift
+set "NO_ENTER=0"
+if "%~1"=="--no-enter" (
+    set "NO_ENTER=1"
     shift
-    goto :run_loop
-    :run_exec
-    "%TMUX_EXE%" -u send-keys -t "!TARGET!" -l "!CMD_TEXT!"
+) else if "%~1"=="-n" (
+    set "NO_ENTER=1"
+    shift
+)
+set "CMD_TEXT="
+:run_loop
+if "%~1"=="" goto :run_exec
+if "!CMD_TEXT!"=="" (
+    set "CMD_TEXT=%~1"
+) else (
+    set "CMD_TEXT=!CMD_TEXT! %~1"
+)
+shift
+goto :run_loop
+:run_exec
+"%TMUX_EXE%" -u send-keys -t "!TARGET!" -l "!CMD_TEXT!"
+if "!NO_ENTER!"=="0" (
     "%TMUX_EXE%" -u send-keys -t "!TARGET!" Enter
-    exit /b 0
 )
+exit /b 0
 
-:: Fast-path 6: capture <target>
-if /i "%SUBCMD%"=="capture" (
-    set "TARGET=%~2"
-    set "LINES=50"
-    if "%~3"=="-n" set "LINES=%~4"
-    "%TMUX_EXE%" -u capture-pane -p -t "!TARGET!" -S "-!LINES!"
-    exit /b %ERRORLEVEL%
-)
-
-:: Fast-path 7: raw forwarding '--'
-if "%SUBCMD%"=="--" (
-    shift
-    "%TMUX_EXE%" -u %1 %2 %3 %4 %5 %6 %7 %8 %9
-    exit /b %ERRORLEVEL%
-)
-
-:: Fall back to PowerShell for rich features (doctor, setup, layout presets, complex new-session parsing)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%MINITMUX_ROOT%\bin\mtmux.ps1" %*
+:do_capture
+set "TARGET=%~2"
+set "LINES=50"
+if "%~3"=="-n" set "LINES=%~4"
+"%TMUX_EXE%" -u capture-pane -p -t "!TARGET!" -S "-!LINES!"
 exit /b %ERRORLEVEL%

@@ -170,9 +170,9 @@ Assert-Check "Terminal input/output command roundtrip" $utf8Ok
 & $MtmuxPs1 kill io_sess
 
 # -----------------------------------------------------------------------------
-# 7. Path Translation & Cleanup
+# 7. Path Translation
 # -----------------------------------------------------------------------------
-Write-Host "`n[Group 7] Path Translation & Teardown" -ForegroundColor Yellow
+Write-Host "`n[Group 7] Path Translation" -ForegroundColor Yellow
 
 & $MtmuxPs1 new path_sess -d -c "$RootDir"
 [void](Wait-Condition { (& $TmuxPs1 has-session -t path_sess 2>$null); $LASTEXITCODE -eq 0 } 500)
@@ -183,6 +183,56 @@ $pathOk = Wait-Condition {
     $out -match '/cygdrive/.*mini-tmux-for-windows'
 } 1500
 Assert-Check "Windows working directory translated to POSIX /cygdrive" $pathOk
+& $MtmuxPs1 kill path_sess
+
+# -----------------------------------------------------------------------------
+# 8. Visual Theme System
+# -----------------------------------------------------------------------------
+Write-Host "`n[Group 8] Visual Theme Management" -ForegroundColor Yellow
+
+$themeListOut = (& $MtmuxPs1 theme list *>&1) | Out-String
+Assert-Check "mtmux theme list displays available themes" ($themeListOut -match 'tokyo-night' -and $themeListOut -match 'catppuccin-mocha') "Got: $themeListOut"
+
+& $MtmuxPs1 theme tokyo-night
+$currTheme = Join-Path $RootDir 'etc\themes\current.conf'
+$tokyoContent = [System.IO.File]::ReadAllText($currTheme)
+Assert-Check "mtmux theme tokyo-night applies theme configuration" ($tokyoContent -match '#1a1b26')
+
+# Reset to catppuccin
+& $MtmuxPs1 theme catppuccin-mocha
+
+# -----------------------------------------------------------------------------
+# 9. Session Persistence (Save & Restore)
+# -----------------------------------------------------------------------------
+Write-Host "`n[Group 9] Session Persistence (Save & Restore)" -ForegroundColor Yellow
+
+& $MtmuxPs1 new snap_sess -d
+& $MtmuxPs1 layout split -Name snap_sess
+
+$snapFile = Join-Path $RootDir 'tmp\test_snap.json'
+if (Test-Path $snapFile) { Remove-Item -Path $snapFile -Force }
+
+& $MtmuxPs1 save $snapFile
+Assert-Check "mtmux save exports snapshot JSON" (Test-Path $snapFile)
+
+$snapJson = [System.IO.File]::ReadAllText($snapFile)
+Assert-Check "Snapshot contains session and pane layout" ($snapJson -match 'snap_sess')
+
+# Terminate session then restore from snapshot
+& $MtmuxPs1 kill snap_sess
+[void](Wait-Condition { (& $TmuxPs1 has-session -t snap_sess 2>$null); $LASTEXITCODE -ne 0 } 500)
+
+& $MtmuxPs1 restore $snapFile
+$restoreOk = Wait-Condition { (& $TmuxPs1 has-session -t snap_sess 2>$null); $LASTEXITCODE -eq 0 } 1500
+Assert-Check "mtmux restore recreates saved session and panes" $restoreOk
+
+& $MtmuxPs1 kill snap_sess
+if (Test-Path $snapFile) { Remove-Item -Path $snapFile -Force }
+
+# -----------------------------------------------------------------------------
+# 10. Clean Teardown
+# -----------------------------------------------------------------------------
+Write-Host "`n[Group 10] Server Teardown & Process Hygiene" -ForegroundColor Yellow
 
 & $MtmuxPs1 kill --all
 [void](Wait-Condition { -not (Get-Process -Name "*tmux*" -ErrorAction SilentlyContinue) } 500)

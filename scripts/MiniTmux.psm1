@@ -3,7 +3,7 @@
     MiniTmux PowerShell Module
 .DESCRIPTION
     Provides native PowerShell cmdlets to interact with and automate MiniTmux sessions,
-    windows, panes, and multi-agent workflows.
+    windows, panes, snapshots, themes, and multi-agent workflows.
 #>
 
 $Script:MiniTmuxRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -112,6 +112,43 @@ function Get-MiniTmuxPane {
     return $output
 }
 
+function Save-MiniTmuxSession {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0)]
+        [string]$Path
+    )
+
+    & $Script:MtmuxPs1 save $Path
+}
+
+function Restore-MiniTmuxSession {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0)]
+        [string]$Path
+    )
+
+    & $Script:MtmuxPs1 restore $Path
+}
+
+function Get-MiniTmuxTheme {
+    [CmdletBinding()]
+    param()
+
+    & $Script:MtmuxPs1 theme list
+}
+
+function Set-MiniTmuxTheme {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0)]
+        [string]$Name
+    )
+
+    & $Script:MtmuxPs1 theme $Name
+}
+
 function Test-MiniTmux {
     [CmdletBinding()]
     param()
@@ -119,4 +156,68 @@ function Test-MiniTmux {
     & $Script:MtmuxPs1 doctor
 }
 
-Export-ModuleMember -Function Get-MiniTmuxSession, New-MiniTmuxSession, Remove-MiniTmuxSession, Send-MiniTmuxKeys, Get-MiniTmuxPane, Test-MiniTmux
+function Register-MiniTmuxCompletions {
+    [CmdletBinding()]
+    param()
+
+    if (Get-Command Register-ArgumentCompleter -ErrorAction SilentlyContinue) {
+        $completerBlock = {
+            param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+
+            $subcommands = @('new', 'attach', 'a', 'list', 'ls', 'kill', 'layout', 'run', 'capture', 'save', 'restore', 'theme', 'themes', 'doctor', 'setup', 'wt')
+            $layouts = @('dev', 'split', 'vsplit', 'quad', 'agents')
+            $elements = $commandAst.Elements
+            
+            if ($elements.Count -le 2) {
+                return ($subcommands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "MiniTmux subcommand: $_")
+                })
+            }
+
+            $subcmd = $elements[1].Extent.Text
+            if ($subcmd -in @('attach', 'a', 'kill', 'run', 'capture', 'wt')) {
+                $sessions = & $Script:TmuxExe list-sessions -F "#{session_name}" 2>$null
+                if ($sessions) {
+                    return ($sessions | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Session: $_")
+                    })
+                }
+            }
+
+            if ($subcmd -eq 'layout') {
+                return ($layouts | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Layout preset: $_")
+                })
+            }
+
+            if ($subcmd -eq 'theme') {
+                $themeDir = Join-Path $Script:MiniTmuxRoot 'etc\themes'
+                if (Test-Path $themeDir) {
+                    $themes = (Get-ChildItem $themeDir -Filter "*.conf" | Where-Object { $_.BaseName -ne 'current' } | ForEach-Object { $_.BaseName })
+                    return ($themes | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Theme: $_")
+                    })
+                }
+            }
+        }
+
+        Register-ArgumentCompleter -Native -CommandName 'mtmux' -ScriptBlock $completerBlock
+        Register-ArgumentCompleter -Native -CommandName 'mtmux.cmd' -ScriptBlock $completerBlock
+    }
+}
+
+# Automatically register argument completions on module load
+Register-MiniTmuxCompletions
+
+Export-ModuleMember -Function `
+    Get-MiniTmuxSession, `
+    New-MiniTmuxSession, `
+    Remove-MiniTmuxSession, `
+    Send-MiniTmuxKeys, `
+    Get-MiniTmuxPane, `
+    Save-MiniTmuxSession, `
+    Restore-MiniTmuxSession, `
+    Get-MiniTmuxTheme, `
+    Set-MiniTmuxTheme, `
+    Test-MiniTmux, `
+    Register-MiniTmuxCompletions

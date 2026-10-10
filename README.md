@@ -66,17 +66,49 @@ MiniTmux includes an ergonomic management utility (`bin\mtmux.cmd` / `bin\mtmux.
 ```text
 USAGE:
     mtmux                     Attach to 'main' session, or create it if not running
-    mtmux new [name] [-d]     Create a session (default: 'main', detached with -d)
+    mtmux new [name] [-d]     Create a session (default: 'main', detached with -d) [pure batch fast-path]
     mtmux attach [name]       Attach to an existing session (alias: mtmux a)
     mtmux list | ls           List running sessions with window count and status
     mtmux kill [name|--all]   Terminate a specific session or kill the entire server
     mtmux layout <preset>     Apply a layout preset (dev, split, vsplit, quad, agents)
-    mtmux run <target> <cmd>  Send a command to a pane and execute it (auto Enter)
+    mtmux run <target> <cmd>  Send a command to a pane and execute it (use -n for raw keys)
     mtmux capture <target>    Capture and print visible pane content to stdout
+    mtmux save [file]         Export running sessions, windows, and pane layouts to snapshot JSON
+    mtmux restore [file]      Restore sessions, windows, and split geometry from snapshot
+    mtmux theme [name|list]   List or switch visual theme (catppuccin, tokyonight, nord, etc.)
     mtmux doctor              Run system health, runtime isolation, and collision checks
     mtmux setup               Add MiniTmux to User PATH and register Windows Terminal
     mtmux wt [session]        Launch session in a new tab inside Windows Terminal
     mtmux -- <tmux-args...>   Forward raw arguments directly to tmux
+```
+
+### Session Persistence (Save & Restore)
+
+Never lose your multiplexer workspace on restart or system reboot:
+
+```powershell
+# Save all running sessions, windows, pane splits, and directories
+mtmux save
+
+# Restore all saved sessions with exact pane geometry and working directories
+mtmux restore
+```
+
+### Visual Themes Gallery
+
+Switch themes instantly on-the-fly (automatically applies to running tmux sessions):
+
+```powershell
+# List available themes
+mtmux theme list
+
+# Switch to Tokyo Night, Nord, Gruvbox, Dracula, or One Dark
+mtmux theme tokyo-night
+mtmux theme nord
+mtmux theme gruvbox-dark
+mtmux theme dracula
+mtmux theme one-dark
+mtmux theme catppuccin-mocha
 ```
 
 ### Layout Presets

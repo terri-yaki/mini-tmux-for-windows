@@ -1,10 +1,9 @@
 #!/usr/bin/bash
 # Validation suite for mini-tmux-for-windows. Expects a running server on the "validate" socket with session "main",
-# started with a Git-free PATH so panes load the bundled runtime:
-#   PATH="/d/workspace/mini-tmux-for-windows/usr/bin:/c/WINDOWS/system32:/c/WINDOWS" #   tmux -L validate new-session -d -s main -x 220 -y 50
-# then, inside that session's pane:
-#   bash /tmp/validate.sh
-export PATH="/usr/bin:/d/workspace/mini-tmux-for-windows/usr/bin:$PATH"
+# started with a Git-free PATH so panes load the bundled runtime.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+export PATH="/usr/bin:$REPO_ROOT/usr/bin:$PATH"
 TMUX="tmux -L validate"
 PASS=0; FAIL=0
 
@@ -80,7 +79,7 @@ $TMUX set-option -g mouse on
 check "set mouse on" "on" "$($TMUX show-options -g -v mouse)"
 $TMUX set-option -p -t work:0.0 @name kimi
 check "pane label @name" "kimi" "$($TMUX list-panes -t work:0.0 -F '#{@name}' | grep -m1 kimi)"
-rc_ok "source-file tmux.conf" $TMUX source-file /cygdrive/d/workspace/mini-tmux-for-windows/etc/tmux.conf
+rc_ok "source-file tmux.conf" $TMUX source-file "$REPO_ROOT/etc/tmux.conf"
 
 # ── G. command prompt + multi-session ─────────────────────────
 $TMUX send-keys -t work:0.0 C-b :; sleep 0.4
