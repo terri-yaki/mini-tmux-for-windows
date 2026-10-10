@@ -1,4 +1,7 @@
+# MiniTmux runtime artifacts
 tmp/*
 !tmp/.gitkeep
+home/
 *.log
-tests/*
+.DS_Store
+Thumbs.db
