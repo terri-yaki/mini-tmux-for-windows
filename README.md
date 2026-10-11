@@ -57,11 +57,29 @@ This will:
 
 *(To uninstall at any time: `powershell -ExecutionPolicy Bypass -File .\scripts\Install-MiniTmux.ps1 -Uninstall`)*
 
+### 3. macOS & Linux Companion Support
+MiniTmux provides native POSIX shell launchers (`bin/mtmux` and `./mtmux`) that leverage your host's native `tmux` binary (installed via Homebrew or apt) while providing the identical ergonomic CLI, theme switcher, and agent presets:
+
+```bash
+# Optional: Symlink to PATH to use globally anywhere
+ln -sf "$(pwd)/mtmux" /opt/homebrew/bin/mtmux  # macOS Apple Silicon
+# or: ln -sf "$(pwd)/mtmux" ~/.local/bin/mtmux
+
+# Launch or attach directly
+mtmux
+
+# Set up multi-agent layout
+mtmux layout agents -Name ai-team
+
+# Run health diagnostics
+mtmux doctor
+```
+
 ---
 
 ## 🛠️ The `mtmux` CLI Reference
 
-MiniTmux includes an ergonomic management utility (`bin\mtmux.cmd` / `bin\mtmux.ps1`):
+MiniTmux includes a unified management utility (`mtmux` / `bin\mtmux.cmd` / `bin\mtmux.ps1` / `bin/mtmux`):
 
 ```text
 USAGE:

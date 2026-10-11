@@ -38,3 +38,27 @@ jobs:
           path: |
             dist/*.zip
             dist/*.sha256
+
+  validate-posix:
+    name: POSIX (${{ matrix.os }}) Verification
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: brew install tmux
+
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Run POSIX Automated Test Suite
+        run: |
+          chmod +x bin/mtmux mtmux tests/Test-MiniTmuxPosix.sh
+          ./tests/Test-MiniTmuxPosix.sh

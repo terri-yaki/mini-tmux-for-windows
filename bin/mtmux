@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# MiniTmux POSIX CLI Launcher (bin/mtmux)
+# High-performance, cross-platform tmux management for macOS, Linux & Windows
+# ==============================================================================
+
+set -e
+
+# Resolve script and root directories (supporting symlinks)
+SOURCE="${BASH_SOURCE[0]:-$0}"
+while [ -h "$SOURCE" ]; do
+    DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+MINITMUX_ROOT="$( cd -P "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd )"
+
+# Ensure tmp dir exists
+mkdir -p "$MINITMUX_ROOT/tmp" 2>/dev/null || true
+
+# Locate tmux executable
+if [ -n "$TMUX_EXE" ] && [ -x "$TMUX_EXE" ]; then
+    TMUX_BIN="$TMUX_EXE"
+elif command -v tmux >/dev/null 2>&1; then
+    TMUX_BIN="$(command -v tmux)"
+elif [ -x "/opt/homebrew/bin/tmux" ]; then
+    TMUX_BIN="/opt/homebrew/bin/tmux"
+elif [ -x "/usr/local/bin/tmux" ]; then
+    TMUX_BIN="/usr/local/bin/tmux"
+elif [ -x "$MINITMUX_ROOT/usr/bin/tmux.exe" ]; then
+    TMUX_BIN="$MINITMUX_ROOT/usr/bin/tmux.exe"
+else
+    echo -e "\033[31m[ERROR] tmux executable not found.\033[0m" >&2
+    echo "Please install tmux (e.g., 'brew install tmux' on macOS, 'apt install tmux' on Debian/Ubuntu)." >&2
+    exit 1
+fi
+
+TMUX_CONF="$MINITMUX_ROOT/etc/tmux.conf"
+THEMES_DIR="$MINITMUX_ROOT/etc/themes"
+
+# ANSI Colors
+C_RESET="\033[0m"
+C_BOLD="\033[1m"
+C_CYAN="\033[36m"
+C_GREEN="\033[32m"
+C_YELLOW="\033[33m"
+C_BLUE="\033[34m"
+C_GRAY="\033[90m"
+C_RED="\033[31m"
+
+run_tmux() {
+    if [ -f "$TMUX_CONF" ]; then
+        "$TMUX_BIN" -f "$TMUX_CONF" "$@"
+    else
+        "$TMUX_BIN" "$@"
+    fi
+}
+
+show_help() {
+    cat <<EOF
+${C_CYAN}${C_BOLD}MiniTmux - Terminal Multiplexer CLI${C_RESET}
+${C_GRAY}Repository: ${MINITMUX_ROOT}${C_RESET}
+
+${C_YELLOW}USAGE:${C_RESET}
+    mtmux                     Attach to 'main' session, or create it if not running
+    mtmux new [name] [-d]     Create a new session (default: 'main')
+    mtmux attach [name]       Attach to an existing session (alias: 'a')
+    mtmux list | ls           List running sessions with formatted status
+    mtmux kill [name|--all]   Terminate a session or kill the entire server
+    mtmux layout <preset>     Launch or configure a structured layout (dev, split, quad, agents)
+    mtmux run <target> <cmd>  Send a command to a pane and execute it (-n for raw keys)
+    mtmux capture <target>    Capture and print visible pane content
+    mtmux theme [name|list]   List or switch visual color theme
+    mtmux doctor              Run diagnostic checks on tmux and environment
+    mtmux -- [raw args...]    Direct pass-through to tmux
+
+${C_YELLOW}LAYOUT PRESETS:${C_RESET}
+    ${C_GREEN}agents${C_RESET}   3-pane multi-agent layout (Coordinator left 55%, 2 Workers stacked right 45%)
+    ${C_GREEN}dev${C_RESET}      70% editor/main pane on left, 30% split build/test panes on right
+    ${C_GREEN}split${C_RESET}    Two side-by-side horizontal panes (50/50)
+    ${C_GREEN}vsplit${C_RESET}   Two stacked vertical panes (50/50)
+    ${C_GREEN}quad${C_RESET}     Balanced 2x2 grid (4 panes)
+
+${C_YELLOW}THEMES:${C_RESET}
+    catppuccin-mocha, tokyo-night, nord, gruvbox-dark, dracula, one-dark
+
+${C_YELLOW}EXAMPLES:${C_RESET}
+    mtmux layout agents -Name ai-team
+    mtmux run ai-team:0.0 "git status"
+    mtmux capture ai-team:0.0
+    mtmux theme tokyo-night
+EOF
+}
+
+cmd_list() {
+    if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
+        echo -e "${C_GRAY}No active tmux sessions found.${C_RESET}"
+        return 0
+    fi
+    echo -e "${C_BOLD}SESSION              WINDOWS    ATTACHED     CREATED${C_RESET}"
+    echo -e "${C_GRAY}------------------------------------------------------------${C_RESET}"
+    "$TMUX_BIN" list-sessions -F "#{session_name}|#{session_windows}|#{session_attached}|#{session_created_string}" | while IFS="|" read -r name windows attached created; do
+        if [ "$attached" -gt 0 ]; then
+            att_str="${C_GREEN}yes ($attached)${C_RESET}"
+        else
+            att_str="${C_GRAY}no${C_RESET}"
+        fi
+        printf "%-20s %-10s %-20b %s\n" "$name" "$windows" "$att_str" "$created"
+    done
+}
+
+cmd_layout() {
+    local preset="$1"
+    local session="main"
+    local detached=0
+    shift || true
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -Name|-name|-s|--session)
+                session="$2"
+                shift 2
+                ;;
+            -d|--detached)
+                detached=1
+                shift
+                ;;
+            *)
+                session="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$preset" ]; then
+        echo -e "${C_YELLOW}Usage: mtmux layout <dev|split|vsplit|quad|agents> [-Name session] [-d]${C_RESET}"
+        return 1
+    fi
+
+    # Create detached session if it doesn't already exist
+    if ! "$TMUX_BIN" has-session -t "$session" >/dev/null 2>&1; then
+        run_tmux new-session -d -s "$session" -x 220 -y 55
+    fi
+
+    case "$preset" in
+        dev)
+            run_tmux split-window -h -t "${session}:0" -p 30
+            run_tmux split-window -v -t "${session}:0.1" -p 50
+            run_tmux select-pane -t "${session}:0.0"
+            echo -e "${C_GREEN}Created 'dev' layout in session '$session' (editor + build/test panes)${C_RESET}"
+            ;;
+        split)
+            run_tmux split-window -h -t "${session}:0" -p 50
+            run_tmux select-pane -t "${session}:0.0"
+            echo -e "${C_GREEN}Created 'split' layout in session '$session' (50/50 horizontal)${C_RESET}"
+            ;;
+        vsplit)
+            run_tmux split-window -v -t "${session}:0" -p 50
+            run_tmux select-pane -t "${session}:0.0"
+            echo -e "${C_GREEN}Created 'vsplit' layout in session '$session' (50/50 vertical)${C_RESET}"
+            ;;
+        quad)
+            run_tmux split-window -h -t "${session}:0" -p 50
+            run_tmux split-window -v -t "${session}:0.0" -p 50
+            run_tmux split-window -v -t "${session}:0.2" -p 50
+            run_tmux select-pane -t "${session}:0.0"
+            echo -e "${C_GREEN}Created 'quad' 2x2 layout in session '$session'${C_RESET}"
+            ;;
+        agents)
+            run_tmux split-window -h -t "${session}:0" -p 45
+            run_tmux split-window -v -t "${session}:0.1" -p 50
+            run_tmux set-option -p -t "${session}:0.0" @role "coordinator"
+            run_tmux set-option -p -t "${session}:0.1" @role "worker-1"
+            run_tmux set-option -p -t "${session}:0.2" @role "worker-2"
+            run_tmux select-pane -t "${session}:0.0"
+            echo -e "${C_GREEN}Created 'agents' multi-agent layout in session '$session'${C_RESET}"
+            echo -e "  ${C_CYAN}Pane 0:${C_RESET} Coordinator   [left 55%]"
+            echo -e "  ${C_CYAN}Pane 1:${C_RESET} Worker 1      [top right 45%]"
+            echo -e "  ${C_CYAN}Pane 2:${C_RESET} Worker 2      [bottom right 45%]"
+            ;;
+        *)
+            echo -e "${C_RED}Unknown layout preset: '$preset'. Supported: dev, split, vsplit, quad, agents${C_RESET}"
+            return 1
+            ;;
+    esac
+
+    # If invoked interactively and outside tmux and not detached, attach to session
+    if [ "$detached" -eq 0 ] && [ -t 0 ] && [ -t 1 ] && [ -n "$TERM" ] && [ "$TERM" != "dumb" ] && [ -z "$TMUX" ]; then
+        run_tmux attach-session -t "$session" || true
+    fi
+}
+
+cmd_theme() {
+    local target="$1"
+    if [ -z "$target" ] || [ "$target" = "list" ]; then
+        echo -e "${C_BOLD}Available Themes:${C_RESET}"
+        if [ -d "$THEMES_DIR" ]; then
+            for f in "$THEMES_DIR"/*.conf; do
+                [ -f "$f" ] || continue
+                bname="$(basename "$f" .conf)"
+                [ "$bname" = "current" ] && continue
+                echo -e "  - ${C_CYAN}$bname${C_RESET}"
+            done
+        fi
+        return 0
+    fi
+
+    local theme_file="$THEMES_DIR/${target}.conf"
+    if [ ! -f "$theme_file" ]; then
+        echo -e "${C_RED}Theme not found: '$target'. Run 'mtmux theme list' to see available themes.${C_RESET}"
+        return 1
+    fi
+
+    mkdir -p "$HOME/.config/mtmux" 2>/dev/null || true
+    cp "$theme_file" "$HOME/.config/mtmux/current.conf" 2>/dev/null || true
+    cp "$theme_file" "$THEMES_DIR/current.conf" 2>/dev/null || true
+    if "$TMUX_BIN" ls >/dev/null 2>&1; then
+        run_tmux source-file "$theme_file" 2>/dev/null || true
+    fi
+    echo -e "${C_GREEN}Switched theme to '$target'${C_RESET}"
+}
+
+cmd_doctor() {
+    echo -e "${C_CYAN}${C_BOLD}=== MiniTmux Diagnostics ===${C_RESET}"
+    echo -e "  tmux binary : ${C_GREEN}$TMUX_BIN${C_RESET}"
+    echo -e "  tmux version: $("$TMUX_BIN" -V)"
+    echo -e "  Root path   : $MINITMUX_ROOT"
+    echo -e "  Config file : $([ -f "$TMUX_CONF" ] && echo "${C_GREEN}$TMUX_CONF${C_RESET}" || echo "${C_YELLOW}none${C_RESET}")"
+    echo -e "  Themes dir  : $([ -d "$THEMES_DIR" ] && echo "${C_GREEN}$THEMES_DIR${C_RESET}" || echo "${C_YELLOW}none${C_RESET}")"
+    echo -e "  Active theme: $([ -f "$THEMES_DIR/current.conf" ] && echo "${C_GREEN}active${C_RESET}" || echo "${C_YELLOW}default (catppuccin-mocha)${C_RESET}")"
+    echo -e "  Terminal    : ${TERM:-unset}"
+    echo -e "  Shell       : ${SHELL:-unset}"
+    echo -e "${C_GREEN}MiniTmux is ready.${C_RESET}"
+}
+
+# Subcommand dispatch
+SUBCMD="${1:-}"
+
+case "$SUBCMD" in
+    "" )
+        if "$TMUX_BIN" has-session -t main >/dev/null 2>&1; then
+            run_tmux attach-session -t main
+        else
+            run_tmux new-session -s main
+        fi
+        ;;
+    new)
+        shift
+        DETACHED=0
+        NAME="main"
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -d|--detached) DETACHED=1 ;;
+                *) NAME="$1" ;;
+            esac
+            shift
+        done
+        if [ "$DETACHED" -eq 1 ]; then
+            run_tmux new-session -d -s "$NAME"
+            echo -e "${C_GREEN}Created detached session '$NAME'.${C_RESET}"
+        else
+            if "$TMUX_BIN" has-session -t "$NAME" >/dev/null 2>&1; then
+                echo "Session '$NAME' already exists. Attaching..."
+                run_tmux attach-session -t "$NAME"
+            else
+                run_tmux new-session -s "$NAME"
+            fi
+        fi
+        ;;
+    attach|a)
+        shift
+        NAME="${1:-main}"
+        if "$TMUX_BIN" has-session -t "$NAME" >/dev/null 2>&1; then
+            run_tmux attach-session -t "$NAME"
+        else
+            echo "Session '$NAME' not found. Creating..."
+            run_tmux new-session -s "$NAME"
+        fi
+        ;;
+    list|ls)
+        cmd_list
+        ;;
+    kill)
+        shift
+        TARGET="${1:-main}"
+        if [ "$TARGET" = "--all" ] || [ "$TARGET" = "-a" ]; then
+            "$TMUX_BIN" kill-server >/dev/null 2>&1 || true
+            echo -e "${C_YELLOW}Killed all tmux sessions (server stopped).${C_RESET}"
+        else
+            "$TMUX_BIN" kill-session -t "$TARGET"
+            echo -e "${C_YELLOW}Killed session '$TARGET'.${C_RESET}"
+        fi
+        ;;
+    layout)
+        shift
+        cmd_layout "$@"
+        ;;
+    run)
+        shift
+        TARGET="$1"
+        shift
+        NO_ENTER=0
+        if [ "$1" = "-n" ] || [ "$1" = "--no-enter" ]; then
+            NO_ENTER=1
+            shift
+        fi
+        CMD="$*"
+        if [ "$NO_ENTER" -eq 1 ]; then
+            "$TMUX_BIN" send-keys -t "$TARGET" "$CMD"
+        else
+            "$TMUX_BIN" send-keys -t "$TARGET" "$CMD" C-m
+        fi
+        ;;
+    capture)
+        shift
+        TARGET="${1:-0}"
+        "$TMUX_BIN" capture-pane -p -t "$TARGET"
+        ;;
+    theme)
+        shift
+        cmd_theme "$@"
+        ;;
+    doctor)
+        cmd_doctor
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    --)
+        shift
+        run_tmux "$@"
+        ;;
+    *)
+        # Forward directly to tmux
+        run_tmux "$@"
+        ;;
+esac
