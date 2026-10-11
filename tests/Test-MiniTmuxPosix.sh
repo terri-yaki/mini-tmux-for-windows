@@ -78,6 +78,15 @@ assert_zero "create detached session" "$MTMUX" new -d "$SESS"
 LS_OUT="$("$MTMUX" ls)"
 assert_contains "session listed in ls" "$SESS" "$LS_OUT"
 
+# 4b. Dynamic agent panel & split
+assert_zero "add split pane" "$MTMUX" split -h -t "$SESS" "echo SPLIT_TEST_OK"
+PANE_SPLIT_COUNT="$(tmux list-panes -t "$SESS" | wc -l | tr -d ' ')"
+assert_eq "split added second pane" "2" "$PANE_SPLIT_COUNT"
+
+assert_zero "add agent panel" "$MTMUX" agent test-runner -t "$SESS"
+PANE_AGENT_COUNT="$(tmux list-panes -t "$SESS" | wc -l | tr -d ' ')"
+assert_eq "agent added third pane" "3" "$PANE_AGENT_COUNT"
+
 # 5. Agent layout preset
 AGENT_SESS="ci-agents-$$"
 assert_zero "create agents layout" "$MTMUX" layout agents -d -Name "$AGENT_SESS"

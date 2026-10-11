@@ -68,6 +68,8 @@ ${C_YELLOW}USAGE:${C_RESET}
     mtmux attach [name]       Attach to an existing session (alias: 'a')
     mtmux list | ls           List running sessions with formatted status
     mtmux kill [name|--all]   Terminate a session or kill the entire server
+    mtmux agent [name] [-v]   Add an AI agent panel (agy, debugger, code-reviewer, etc.)
+    mtmux split [-v] [cmd]    Split current window horizontally or vertically with optional cmd
     mtmux layout <preset>     Launch or configure a structured layout (dev, split, quad, agents)
     mtmux run <target> <cmd>  Send a command to a pane and execute it (-n for raw keys)
     mtmux capture <target>    Capture and print visible pane content
@@ -234,6 +236,70 @@ cmd_doctor() {
     echo -e "${C_GREEN}MiniTmux is ready.${C_RESET}"
 }
 
+cmd_agent() {
+    local agent_name=""
+    local dir="-h"
+    local target=""
+    
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--horizontal) dir="-h" ;;
+            -v|--vertical) dir="-v" ;;
+            -t|--target) target="$2"; shift ;;
+            *) [ -z "$agent_name" ] && agent_name="$1" ;;
+        esac
+        shift
+    done
+    
+    if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
+        run_tmux new-session -d -s main
+        [ -z "$target" ] && target="main"
+    fi
+    
+    local cmd="agy"
+    if [ -n "$agent_name" ]; then
+        cmd="agy --agent $agent_name"
+    fi
+    local shell_cmd="$cmd; exec \${SHELL:-/bin/zsh}"
+    
+    if [ -n "$target" ]; then
+        run_tmux split-window "$dir" -t "$target" "$shell_cmd"
+    else
+        run_tmux split-window "$dir" "$shell_cmd"
+    fi
+    echo -e "${C_GREEN}Spawned agent panel with '${cmd}'${C_RESET}"
+}
+
+cmd_split() {
+    local dir="-h"
+    local target=""
+    local custom_cmd=""
+    
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--horizontal) dir="-h" ;;
+            -v|--vertical) dir="-v" ;;
+            -t|--target) target="$2"; shift ;;
+            *) custom_cmd="$*" ; break ;;
+        esac
+        shift
+    done
+    
+    if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
+        run_tmux new-session -d -s main
+        [ -z "$target" ] && target="main"
+    fi
+    
+    local split_args=("$dir")
+    [ -n "$target" ] && split_args+=("-t" "$target")
+    if [ -n "$custom_cmd" ]; then
+        split_args+=("$custom_cmd; exec \${SHELL:-/bin/zsh}")
+    fi
+    
+    run_tmux split-window "${split_args[@]}"
+    echo -e "${C_GREEN}Added pane ($dir)${C_RESET}"
+}
+
 # Subcommand dispatch
 SUBCMD="${1:-}"
 
@@ -291,6 +357,14 @@ case "$SUBCMD" in
             "$TMUX_BIN" kill-session -t "$TARGET"
             echo -e "${C_YELLOW}Killed session '$TARGET'.${C_RESET}"
         fi
+        ;;
+    agent)
+        shift
+        cmd_agent "$@"
+        ;;
+    split)
+        shift
+        cmd_split "$@"
         ;;
     layout)
         shift
