@@ -691,22 +691,25 @@ switch ($action) {
 
         if ($args[1] -eq "--no-enter" -or $args[1] -eq "-n") {
             $noEnter = $true
-        $isTarget = $false
-        if ($args.Count -ge 3) {
-            if ($args[1] -match '^[a-zA-Z0-9_.-]+:[0-9]' -or $args[1] -match '^%[0-9]+') {
-                $isTarget = $true
-            } else {
-                [void](& $TmuxExe has-session -t $args[1] 2>&1)
-                if ($LASTEXITCODE -eq 0) { $isTarget = $true }
-            }
-        }
-
-        if ($isTarget) {
-            $target = $args[1]
             $cmdIndex = 2
-            if ($args.Count -gt 2 -and ($args[2] -eq "--no-enter" -or $args[2] -eq "-n")) {
-                $noEnter = $true
-                $cmdIndex = 3
+        } else {
+            $isTarget = $false
+            if ($args.Count -ge 3) {
+                if ($args[1] -match '^[a-zA-Z0-9_.-]+:[0-9]' -or $args[1] -match '^%[0-9]+') {
+                    $isTarget = $true
+                } else {
+                    [void](& $TmuxExe has-session -t $args[1] 2>&1)
+                    if ($LASTEXITCODE -eq 0) { $isTarget = $true }
+                }
+            }
+
+            if ($isTarget) {
+                $target = $args[1]
+                $cmdIndex = 2
+                if ($args.Count -gt 2 -and ($args[2] -eq "--no-enter" -or $args[2] -eq "-n")) {
+                    $noEnter = $true
+                    $cmdIndex = 3
+                }
             }
         }
 
