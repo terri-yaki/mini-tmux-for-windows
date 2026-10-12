@@ -147,35 +147,37 @@ cmd_layout() {
 
     case "$preset" in
         dev)
-            run_tmux split-window -h -t "${session}:0" -p 30
-            run_tmux split-window -v -t "${session}:0.1" -p 50
-            run_tmux select-pane -t "${session}:0.0"
+            run_tmux split-window -h -t "$session" -l 30%
+            run_tmux split-window -v -t "$session" -l 50%
+            run_tmux select-pane -t "${session}.0" 2>/dev/null || run_tmux select-pane -t "${session}:0.0" 2>/dev/null || true
             echo -e "${C_GREEN}Created 'dev' layout in session '$session' (editor + build/test panes)${C_RESET}"
             ;;
         split)
-            run_tmux split-window -h -t "${session}:0" -p 50
-            run_tmux select-pane -t "${session}:0.0"
+            run_tmux split-window -h -t "$session" -l 50%
+            run_tmux select-pane -t "${session}.0" 2>/dev/null || run_tmux select-pane -t "${session}:0.0" 2>/dev/null || true
             echo -e "${C_GREEN}Created 'split' layout in session '$session' (50/50 horizontal)${C_RESET}"
             ;;
         vsplit)
-            run_tmux split-window -v -t "${session}:0" -p 50
-            run_tmux select-pane -t "${session}:0.0"
+            run_tmux split-window -v -t "$session" -l 50%
+            run_tmux select-pane -t "${session}.0" 2>/dev/null || run_tmux select-pane -t "${session}:0.0" 2>/dev/null || true
             echo -e "${C_GREEN}Created 'vsplit' layout in session '$session' (50/50 vertical)${C_RESET}"
             ;;
         quad)
-            run_tmux split-window -h -t "${session}:0" -p 50
-            run_tmux split-window -v -t "${session}:0.0" -p 50
-            run_tmux split-window -v -t "${session}:0.2" -p 50
-            run_tmux select-pane -t "${session}:0.0"
+            run_tmux split-window -h -t "$session" -l 50%
+            run_tmux select-pane -t "${session}.0" 2>/dev/null || true
+            run_tmux split-window -v -t "$session" -l 50%
+            run_tmux select-pane -t "${session}.2" 2>/dev/null || true
+            run_tmux split-window -v -t "$session" -l 50%
+            run_tmux select-pane -t "${session}.0" 2>/dev/null || true
             echo -e "${C_GREEN}Created 'quad' 2x2 layout in session '$session'${C_RESET}"
             ;;
         agents)
-            run_tmux split-window -h -t "${session}:0" -p 45
-            run_tmux split-window -v -t "${session}:0.1" -p 50
-            run_tmux set-option -p -t "${session}:0.0" @role "coordinator"
-            run_tmux set-option -p -t "${session}:0.1" @role "worker-1"
-            run_tmux set-option -p -t "${session}:0.2" @role "worker-2"
-            run_tmux select-pane -t "${session}:0.0"
+            run_tmux split-window -h -t "$session" -l 45%
+            run_tmux split-window -v -t "$session" -l 50%
+            run_tmux set-option -p -t "${session}.0" @role "coordinator" 2>/dev/null || run_tmux set-option -p -t "${session}:0.0" @role "coordinator" 2>/dev/null || true
+            run_tmux set-option -p -t "${session}.1" @role "worker-1" 2>/dev/null || run_tmux set-option -p -t "${session}:0.1" @role "worker-1" 2>/dev/null || true
+            run_tmux set-option -p -t "${session}.2" @role "worker-2" 2>/dev/null || run_tmux set-option -p -t "${session}:0.2" @role "worker-2" 2>/dev/null || true
+            run_tmux select-pane -t "${session}.0" 2>/dev/null || run_tmux select-pane -t "${session}:0.0" 2>/dev/null || true
             echo -e "${C_GREEN}Created 'agents' multi-agent layout in session '$session'${C_RESET}"
             echo -e "  ${C_CYAN}Pane 0:${C_RESET} Coordinator   [left 55%]"
             echo -e "  ${C_CYAN}Pane 1:${C_RESET} Worker 1      [top right 45%]"

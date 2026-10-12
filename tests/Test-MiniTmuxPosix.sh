@@ -94,15 +94,15 @@ assert_zero "create agents layout" "$MTMUX" layout agents -d -Name "$AGENT_SESS"
 PANE_COUNT="$(tmux list-panes -t "$AGENT_SESS" | wc -l | tr -d ' ')"
 assert_eq "agents layout has 3 panes" "3" "$PANE_COUNT"
 
-ROLE_0="$(tmux display-message -p -t "${AGENT_SESS}:0.0" '#{@role}')"
-ROLE_1="$(tmux display-message -p -t "${AGENT_SESS}:0.1" '#{@role}')"
-ROLE_2="$(tmux display-message -p -t "${AGENT_SESS}:0.2" '#{@role}')"
+ROLE_0="$(tmux display-message -p -t "${AGENT_SESS}.0" '#{@role}' 2>/dev/null || tmux display-message -p -t "${AGENT_SESS}:0.0" '#{@role}')"
+ROLE_1="$(tmux display-message -p -t "${AGENT_SESS}.1" '#{@role}' 2>/dev/null || tmux display-message -p -t "${AGENT_SESS}:0.1" '#{@role}')"
+ROLE_2="$(tmux display-message -p -t "${AGENT_SESS}.2" '#{@role}' 2>/dev/null || tmux display-message -p -t "${AGENT_SESS}:0.2" '#{@role}')"
 assert_eq "pane 0 role is coordinator" "coordinator" "$ROLE_0"
 assert_eq "pane 1 role is worker-1" "worker-1" "$ROLE_1"
 assert_eq "pane 2 role is worker-2" "worker-2" "$ROLE_2"
 
 # 6. Run & capture
-assert_zero "run command in coordinator pane" "$MTMUX" run "${AGENT_SESS}:0.0" "echo POSIX_VERIFY_12345"
+assert_zero "run command in coordinator pane" "$MTMUX" run "${AGENT_SESS}" "echo POSIX_VERIFY_12345"
 sleep 0.5
 CAPTURED="$("$MTMUX" capture "${AGENT_SESS}:0.0")"
 assert_contains "capture pane verified command output" "POSIX_VERIFY_12345" "$CAPTURED"
