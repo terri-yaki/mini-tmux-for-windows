@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 # Validation suite for mini-tmux-for-windows. Expects a running server on the "validate" socket with session "main",
 # started with a Git-free PATH so panes load the bundled runtime.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

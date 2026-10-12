@@ -33,8 +33,24 @@ Unlike raw MSYS2 binary dumps, MiniTmux is an autonomous, production-grade termi
 
 ## 🚀 Quick Start
 
-### 1. Zero-Install Execution
-Run MiniTmux immediately from this directory without installing anything:
+### 1. One-Line Web Installer
+
+Install MiniTmux anywhere with a single command:
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/terri-yaki/mini-tmux-for-windows/main/scripts/install.ps1 | iex
+```
+
+**macOS & Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/terri-yaki/mini-tmux-for-windows/main/scripts/install.sh | bash
+```
+
+---
+
+### 2. Zero-Install Execution
+Run MiniTmux immediately from a cloned directory without installing anything:
 
 ```powershell
 # Launch or attach to the primary session
@@ -44,62 +60,44 @@ Run MiniTmux immediately from this directory without installing anything:
 .\mtmux doctor
 ```
 
-### 2. One-Click Setup (Register to PATH & Windows Terminal)
-To make `mtmux` and `tmux` available globally in any command prompt, PowerShell, or Windows Terminal:
+### 3. Local Setup & Windows Terminal Profile
+To configure PATH, register shell completions, and install the **Windows Terminal** profile:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Install-MiniTmux.ps1
 ```
 
-This will:
-1. Register `bin` and `usr\bin` in your User `PATH` (no administrator privileges needed).
-2. Install the **MiniTmux** profile into **Windows Terminal** so you can open MiniTmux directly from the `+` tab menu.
-
 *(To uninstall at any time: `powershell -ExecutionPolicy Bypass -File .\scripts\Install-MiniTmux.ps1 -Uninstall`)*
-
-### 3. macOS & Linux Companion Support
-MiniTmux provides native POSIX shell launchers (`bin/mtmux` and `./mtmux`) that leverage your host's native `tmux` binary (installed via Homebrew or apt) while providing the identical ergonomic CLI, theme switcher, and agent presets:
-
-```bash
-# Optional: Symlink to PATH to use globally anywhere
-ln -sf "$(pwd)/mtmux" /opt/homebrew/bin/mtmux  # macOS Apple Silicon
-# or: ln -sf "$(pwd)/mtmux" ~/.local/bin/mtmux
-
-# Launch or attach directly
-mtmux
-
-# Set up multi-agent layout
-mtmux layout agents -Name ai-team
-
-# Run health diagnostics
-mtmux doctor
-```
 
 ---
 
 ## 🛠️ The `mtmux` CLI Reference
 
-MiniTmux includes a unified management utility (`mtmux` / `bin\mtmux.cmd` / `bin\mtmux.ps1` / `bin/mtmux`):
+MiniTmux includes a unified cross-platform management utility (`mtmux` / `bin\mtmux.cmd` / `bin\mtmux.ps1` / `bin/mtmux`):
 
 ```text
 USAGE:
-    mtmux                     Attach to 'main' session, or create it if not running
-    mtmux new [name] [-d]     Create a session (default: 'main', detached with -d) [pure batch fast-path]
-    mtmux attach [name]       Attach to an existing session (alias: mtmux a)
-    mtmux list | ls           List running sessions with window count and status
-    mtmux kill [name|--all]   Terminate a specific session or kill the entire server
-    mtmux agent [name] [-v]   Add an AI agent panel (agy, debugger, code-reviewer, grok, etc.)
-    mtmux split [-v] [cmd]    Split current window horizontally or vertically with optional command
-    mtmux layout <preset>     Apply a layout preset (dev, split, vsplit, quad, agents)
-    mtmux run [target] <cmd>  Send a command to a pane (defaults to active pane; -n for raw keys)
-    mtmux capture [target]    Capture and print visible pane content to stdout
-    mtmux save [file]         Export running sessions, windows, and pane layouts to snapshot JSON
-    mtmux restore [file]      Restore sessions, windows, and split geometry from snapshot
-    mtmux theme [name|list]   List or switch visual theme (catppuccin, tokyonight, nord, etc.)
-    mtmux doctor              Run system health, runtime isolation, and collision checks
-    mtmux setup               Add MiniTmux to User PATH and register Windows Terminal
-    mtmux wt [session]        Launch session in a new tab inside Windows Terminal
-    mtmux -- <tmux-args...>   Forward raw arguments directly to tmux
+    mtmux                           Attach to 'main' session, or create it if not running
+    mtmux new [name] [-d]           Create a session (default: 'main', detached with -d) [pure batch fast-path]
+    mtmux attach [name]             Attach to an existing session (alias: mtmux a)
+    mtmux list | ls                 List running sessions with window count and status
+    mtmux switch [session]          Interactively or directly switch between active sessions (fzf / menu)
+    mtmux kill [name|--all]         Terminate a specific session or kill the entire server
+    mtmux agent [name|tool] [-v]    Add an AI agent panel (agy, claude, grok, gemini, aider, etc.)
+    mtmux split [-v] [cmd]          Split current window horizontally or vertically with optional command
+    mtmux layout <preset>           Apply a layout preset (agents, dev, split, vsplit, quad)
+    mtmux run [target] [-n] <cmd>   Send a command to a pane (defaults to active pane; -n for raw keys)
+    mtmux capture [target] [-n]     Capture pane content (-n lines, -a all history, -o file)
+    mtmux logs [target] [-n]        Alias for capture (view or dump pane logs directly to stdout or file)
+    mtmux inspect [session] [-j]    Inspect sessions/windows/panes hierarchy (--json for MCP / scripts)
+    mtmux save [file]               Export running sessions, windows, and pane layouts to snapshot JSON
+    mtmux restore [file]            Restore sessions, windows, and split geometry from snapshot JSON
+    mtmux theme [name|list]         List or switch visual theme (catppuccin, tokyonight, nord, etc.)
+    mtmux doctor                    Run system health, runtime isolation, and collision checks
+    mtmux completion [shell]        Generate shell completion (bash, zsh, powershell)
+    mtmux setup                     Add MiniTmux to User PATH and register Windows Terminal
+    mtmux wt [session]              Launch session in a new tab inside Windows Terminal
+    mtmux -- <tmux-args...>         Forward raw arguments directly to tmux
 ```
 
 ### ⚡ AI Agent Panel Spawning
@@ -135,6 +133,43 @@ mtmux save
 
 # Restore all saved sessions with exact pane geometry and working directories
 mtmux restore
+```
+
+### 🔄 Interactive Session Switcher (`mtmux switch`)
+
+Easily hop between workspaces without typing session IDs:
+```bash
+# Interactive selection (uses fzf if installed, or clean numeric menu)
+mtmux switch
+
+# Direct switch (seamless inside or outside tmux)
+mtmux switch ai-team
+```
+
+### 🔍 Hierarchy Inspection (`mtmux inspect`)
+
+Inspect all sessions, windows, panes, coordinates, processes, and `@role` tags:
+```bash
+# Pretty-printed terminal hierarchy tree
+mtmux inspect
+
+# Structured JSON output for MCP servers, agent orchestrators, and automation scripts
+mtmux inspect --json
+```
+
+### ⚡ Shell Completion (Bash, Zsh, PowerShell)
+
+Tab-complete subcommands, active session names, layout presets, color themes, and agent tools:
+
+```bash
+# Bash:
+eval "$(mtmux completion bash)"
+
+# Zsh:
+eval "$(mtmux completion zsh)"
+
+# PowerShell:
+mtmux completion powershell | Out-String | Invoke-Expression
 ```
 
 ### Visual Themes Gallery
@@ -206,9 +241,11 @@ MiniTmux ships with a tuned, battery-included configuration:
 
 * **Mouse Support**: Smooth scrolling, pane clicking, and border dragging out of the box.
 * **Truecolor (24-bit RGB)**: Configured for modern terminal emulators (Windows Terminal, WezTerm, Alacritty, Ghostty).
-* **Two-Way Windows Clipboard Synchronization**:
-  * Copying text in copy mode (`y` or `Enter`) pipes directly into `clip.exe`.
-  * Pasting from Windows clipboard via `prefix + ]` or `prefix + C-v`.
+* **Universal Cross-Platform Clipboard & OSC 52**:
+  * Universal terminal clipboard via OSC 52 (`set -s set-clipboard on`).
+  * **Windows**: Bidirectional sync with `clip.exe` and native `winpaste.exe` (~100ms).
+  * **macOS**: Native pipes with `pbcopy` and `pbpaste`.
+  * **Linux**: Automatic detection for Wayland (`wl-copy`/`wl-paste`) and X11 (`xclip`).
 * **Intuitive Splitting**:
   * `prefix + |` : Split horizontally (side-by-side, retains current directory).
   * `prefix + -` : Split vertically (stacked, retains current directory).

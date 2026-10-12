@@ -48,8 +48,9 @@ if /i "%SUBCMD%"=="theme" goto :do_theme
 :: Fast-path 7: run <target> [--no-enter|-n] <command>
 if /i "%SUBCMD%"=="run" goto :do_run
 
-:: Fast-path 8: capture <target>
+:: Fast-path 8: capture / logs <target>
 if /i "%SUBCMD%"=="capture" goto :do_capture
+if /i "%SUBCMD%"=="logs" goto :do_capture
 
 :: Fast-path 9: raw forwarding '--'
 if "%SUBCMD%"=="--" (
@@ -217,8 +218,33 @@ if not "!TARGET!"=="" (
 exit /b 0
 
 :do_capture
-set "TARGET=%~2"
+if "%~2"=="-a" goto :fallback_ps
+if "%~2"=="--all" goto :fallback_ps
+if "%~2"=="-o" goto :fallback_ps
+if "%~2"=="--output" goto :fallback_ps
+if "%~3"=="-a" goto :fallback_ps
+if "%~3"=="--all" goto :fallback_ps
+if "%~3"=="-o" goto :fallback_ps
+if "%~3"=="--output" goto :fallback_ps
+
+set "TARGET="
 set "LINES=50"
-if "%~3"=="-n" set "LINES=%~4"
-"%TMUX_EXE%" -u capture-pane -p -t "!TARGET!" -S "-!LINES!"
+set "ARG2=%~2"
+set "ARG3=%~3"
+set "ARG4=%~4"
+
+if "!ARG2!"=="-n" (
+    if not "!ARG3!"=="" set "LINES=!ARG3!"
+) else if not "!ARG2!"=="" (
+    set "TARGET=!ARG2!"
+    if "!ARG3!"=="-n" (
+        if not "!ARG4!"=="" set "LINES=!ARG4!"
+    )
+)
+
+if not "!TARGET!"=="" (
+    "%TMUX_EXE%" -u capture-pane -p -t "!TARGET!" -S "-!LINES!"
+) else (
+    "%TMUX_EXE%" -u capture-pane -p -S "-!LINES!"
+)
 exit /b %ERRORLEVEL%

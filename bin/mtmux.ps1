@@ -51,28 +51,34 @@ function Show-Help {
 MiniTmux (mtmux) - Native Windows tmux Manager (v3.7b)
 
 USAGE:
-    mtmux                     Attach to 'main' session, or create it if not running
-    mtmux new [name] [-d]     Create a new session (default: 'main')
-    mtmux attach [name]       Attach to an existing session
-    mtmux list | ls           List running sessions with detailed status
-    mtmux kill [name|--all]   Terminate a session or kill the entire server
-    mtmux layout <preset>     Launch or configure a structured layout (dev, split, quad, agents)
-    mtmux run <target> <cmd>  Send a command to a pane and execute it (auto Enter; -n for raw keys)
-    mtmux capture <target>    Capture and print visible pane content
-    mtmux save [file]         Export running sessions, windows & layouts to snapshot file
-    mtmux restore [file]      Restore sessions, windows & pane layouts from snapshot file
-    mtmux theme [name|list]   List or switch visual color theme (catppuccin-mocha, tokyo-night, nord, etc.)
-    mtmux doctor              Run comprehensive health, runtime, and collision diagnostics
-    mtmux setup               Add MiniTmux to User PATH and register Windows Terminal profile
-    mtmux wt [session]        Launch MiniTmux in a new tab inside Windows Terminal
-    mtmux -- <tmux-args...>   Forward raw arguments directly to tmux
+    mtmux                           Attach to 'main' session, or create it if not running
+    mtmux new [name] [-d]           Create a new session (default: 'main')
+    mtmux attach [name]             Attach to an existing session (alias: 'a')
+    mtmux list | ls                 List running sessions with detailed status
+    mtmux switch [session]          Interactively or directly switch between active sessions
+    mtmux kill [name|--all]         Terminate a session or kill the entire server
+    mtmux agent [name|tool] [-v]    Add an AI agent panel (agy, claude, grok, gemini, aider)
+    mtmux split [-v] [cmd]          Split current window horizontally or vertically with optional cmd
+    mtmux layout <preset>           Launch or configure a structured layout (agents, dev, split, quad)
+    mtmux run [target] [-n] <cmd>   Send a command to a pane and execute it (-n for raw keys)
+    mtmux capture [target] [-n]     Capture pane content (-n lines, -a all, -o file)
+    mtmux logs [target] [-n]        Alias for capture (view or dump pane logs)
+    mtmux inspect [session] [-j]    Inspect sessions/windows/panes hierarchy (--json for raw)
+    mtmux save [file]               Export running sessions, windows & layouts to snapshot file
+    mtmux restore [file]            Restore sessions, windows & pane layouts from snapshot file
+    mtmux theme [name|list]         List or switch visual color theme (catppuccin-mocha, tokyo-night, nord, etc.)
+    mtmux doctor                    Run comprehensive health, runtime, and collision diagnostics
+    mtmux completion [shell]        Generate shell completion (bash, zsh, powershell)
+    mtmux setup                     Add MiniTmux to User PATH and register Windows Terminal profile
+    mtmux wt [session]              Launch MiniTmux in a new tab inside Windows Terminal
+    mtmux -- <tmux-args...>         Forward raw arguments directly to tmux
 
 LAYOUT PRESETS:
+    agents   3-pane multi-agent orchestration layout (Coordinator + 2 Worker panes)
     dev      Left 70% editor/main pane, Right 30% split into build and test panes
     split    Two side-by-side horizontal panes (50/50)
     vsplit   Two stacked vertical panes (50/50)
     quad     Balanced 2x2 grid (4 panes)
-    agents   3-pane multi-agent orchestration layout (Coordinator + 2 Worker panes)
 
 THEMES:
     catppuccin-mocha, tokyo-night, nord, gruvbox-dark, dracula, one-dark
@@ -80,12 +86,15 @@ THEMES:
 EXAMPLES:
     mtmux
     mtmux new dev-session
+    mtmux layout agents -Name ai-team
+    mtmux agent claude -v -t ai-team
+    mtmux run ai-team:0.0 "git status"
+    mtmux logs ai-team:0.0 -n 30
+    mtmux inspect --json
+    mtmux switch
     mtmux save
     mtmux restore
     mtmux theme tokyo-night
-    mtmux layout agents -Name ai-team
-    mtmux run ai-team:0.0 "git status"
-    mtmux capture ai-team:0.0
     mtmux doctor
 "@ -ForegroundColor Cyan
 }
@@ -650,7 +659,9 @@ switch ($action) {
             elseif ($args[$i] -eq "-t" -and ($i + 1) -lt $args.Count) { $target = $args[$i + 1]; $i++ }
             elseif (-not $agentName) { $agentName = $args[$i] }
         }
-        $cmd = if ($agentName) { "agy --agent $agentName" } else { "agy" }
+        $cmd = if (-not $agentName) { "agy" }
+               elseif ($agentName -in @('claude', 'grok', 'gemini', 'aider', 'codex')) { $agentName }
+               else { "agy --agent $agentName" }
         $splitArgs = @("split-window", $dir)
         if ($target) { $splitArgs += @("-t", $target) }
         $splitArgs += "$cmd; exec bash"
@@ -672,6 +683,50 @@ switch ($action) {
         if ($customCmd) { $splitArgs += "$customCmd; exec bash" }
         Invoke-TmuxDirect $splitArgs
         Write-Host "Added pane ($dir)" -ForegroundColor Green
+    }
+    'switch' {
+        $rawSessions = & $TmuxExe list-sessions -F "#{session_name}|#{session_windows}|#{session_created_string}|#{session_attached}" 2>$null
+        if (-not $rawSessions) {
+            Write-Host "No active MiniTmux sessions found." -ForegroundColor DarkGray
+            return
+        }
+
+        $targetSess = if ($args.Count -gt 1) { $args[1] } else { $null }
+        if ($targetSess) {
+            Invoke-TmuxDirect @("attach-session", "-t", $targetSess)
+            return
+        }
+
+        $sessionList = @()
+        foreach ($line in $rawSessions) {
+            $p = $line -split '\|'
+            $sessionList += [PSCustomObject]@{
+                Name     = $p[0]
+                Windows  = $p[1]
+                Created  = $p[2]
+                Attached = ($p[3] -eq "1")
+            }
+        }
+
+        if ($sessionList.Count -eq 1) {
+            Invoke-TmuxDirect @("attach-session", "-t", $sessionList[0].Name)
+            return
+        }
+
+        Write-Host "`nMiniTmux Active Sessions:" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $sessionList.Count; $i++) {
+            $s = $sessionList[$i]
+            $att = if ($s.Attached) { " [attached]" } else { "" }
+            Write-Host "  [$($i + 1)] $($s.Name) ($($s.Windows) windows, created $($s.Created))$att" -ForegroundColor Green
+        }
+
+        $choice = Read-Host "`nSelect session (1-$($sessionList.Count)) or 'q' to cancel"
+        if ($choice -match '^\d+$') {
+            $idx = [int]$choice - 1
+            if ($idx -ge 0 -and $idx -lt $sessionList.Count) {
+                Invoke-TmuxDirect @("attach-session", "-t", $sessionList[$idx].Name)
+            }
+        }
     }
     'run' {
         if ($args.Count -lt 2) {
@@ -732,18 +787,127 @@ switch ($action) {
         }
     }
     'capture' {
-        if ($args.Count -lt 2) {
-            Write-Host "Usage: mtmux capture <target> [-n lines]" -ForegroundColor Yellow
+        $target = ""
+        $lines = 50
+        $all = $false
+        $outFile = $null
+
+        $i = 1
+        while ($i -lt $args.Count) {
+            $arg = $args[$i]
+            if ($arg -eq "-n" -and ($i + 1) -lt $args.Count) {
+                $lines = [int]$args[++$i]
+            } elseif ($arg -eq "-a" -or $arg -eq "--all") {
+                $all = $true
+            } elseif (($arg -eq "-o" -or $arg -eq "--output") -and ($i + 1) -lt $args.Count) {
+                $outFile = $args[++$i]
+            } elseif (-not $arg.StartsWith("-")) {
+                if (-not $target) { $target = $arg }
+            }
+            $i++
+        }
+
+        $capArgs = @("capture-pane", "-p")
+        if ($target) { $capArgs += @("-t", $target) }
+        if ($all) {
+            $capArgs += @("-S", "-")
+        } else {
+            $capArgs += @("-S", "-$lines")
+        }
+
+        $output = & $TmuxExe @capArgs
+        if ($outFile) {
+            [System.IO.File]::WriteAllLines($outFile, $output, [System.Text.Encoding]::UTF8)
+            Write-Host "Captured pane output to: $outFile" -ForegroundColor Green
+        } else {
+            $output
+        }
+    }
+    'logs' {
+        $forwardArgs = if ($args.Count -gt 1) { $args[1..($args.Count - 1)] } else { @() }
+        & $MyInvocation.MyCommand.Path capture @forwardArgs
+    }
+    'inspect' {
+        $asJson = $false
+        $target = ""
+        for ($i = 1; $i -lt $args.Count; $i++) {
+            if ($args[$i] -eq "--json" -or $args[$i] -eq "-j") { $asJson = $true }
+            elseif (-not $args[$i].StartsWith("-")) { $target = $args[$i] }
+        }
+
+        $queryArgs = @("list-panes", "-a", "-F", "#{session_name}|#{window_index}|#{window_name}|#{pane_index}|#{pane_id}|#{pane_width}x#{pane_height}|#{pane_current_command}|#{pane_current_path}|#{@role}")
+        if ($target) {
+            $queryArgs = @("list-panes", "-t", $target, "-F", "#{session_name}|#{window_index}|#{window_name}|#{pane_index}|#{pane_id}|#{pane_width}x#{pane_height}|#{pane_current_command}|#{pane_current_path}|#{@role}")
+        }
+
+        $raw = & $TmuxExe @queryArgs 2>$null
+        if (-not $raw) {
+            if ($asJson) { Write-Output "[]" } else { Write-Host "No active sessions running." -ForegroundColor DarkGray }
             return
         }
-        $target = $args[1]
-        $lines = 50
-        for ($i = 2; $i -lt $args.Count; $i++) {
-            if ($args[$i] -eq "-n" -and ($i + 1) -lt $args.Count) {
-                $lines = [int]$args[$i + 1]
+
+        $paneList = @()
+        foreach ($line in $raw) {
+            $p = $line -split '\|'
+            if ($p.Count -lt 8) { continue }
+            $paneList += [PSCustomObject]@{
+                session         = $p[0]
+                window_index    = [int]$p[1]
+                window_name     = $p[2]
+                pane_index      = [int]$p[3]
+                pane_id         = $p[4]
+                dimensions      = $p[5]
+                current_command = $p[6]
+                path            = $p[7]
+                role            = if ($p.Count -gt 8 -and $p[8]) { $p[8] } else { "default" }
             }
         }
-        & $TmuxExe capture-pane -p -t $target -S "-$lines"
+
+        if ($asJson) {
+            ConvertTo-Json -InputObject @($paneList) -Depth 3
+        } else {
+            Write-Host "`nMiniTmux Inspection Hierarchy:" -ForegroundColor Cyan
+            $groupedSessions = $paneList | Group-Object session
+            foreach ($sg in $groupedSessions) {
+                Write-Host " Session $($sg.Name)" -ForegroundColor Green
+                $groupedWindows = $sg.Group | Group-Object window_index
+                foreach ($wg in $groupedWindows) {
+                    $first = $wg.Group[0]
+                    Write-Host "   └── Window [$($wg.Name)] '$($first.window_name)'" -ForegroundColor Yellow
+                    foreach ($pane in $wg.Group) {
+                        $roleStr = if ($pane.role -ne "default") { " (role: $($pane.role))" } else { "" }
+                        Write-Host "         └── Pane [$($pane.pane_index)] $($pane.pane_id) $($pane.dimensions) cmd:$($pane.current_command)$roleStr [$($pane.path)]" -ForegroundColor White
+                    }
+                }
+            }
+            Write-Host ""
+        }
+    }
+    'completion' {
+        $shell = if ($args.Count -gt 1) { $args[1].ToLower() } else { "powershell" }
+        switch ($shell) {
+            'powershell' {
+                $compPath = Join-Path $RootDir 'etc\completion\mtmux.ps1'
+                if (Test-Path $compPath) {
+                    Get-Content $compPath -Raw
+                }
+            }
+            'bash' {
+                $compPath = Join-Path $RootDir 'etc\completion\mtmux.bash'
+                if (Test-Path $compPath) {
+                    Get-Content $compPath -Raw
+                }
+            }
+            'zsh' {
+                $compPath = Join-Path $RootDir 'etc\completion\_mtmux'
+                if (Test-Path $compPath) {
+                    Get-Content $compPath -Raw
+                }
+            }
+            default {
+                Write-Host "Usage: mtmux completion [powershell|bash|zsh]" -ForegroundColor Yellow
+            }
+        }
     }
     'wt' {
         $sess = if ($args.Count -gt 1) { $args[1] } else { "main" }

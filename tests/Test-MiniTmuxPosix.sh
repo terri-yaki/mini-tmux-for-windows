@@ -113,6 +113,52 @@ sleep 0.5
 CAPTURED_AUTO="$("$MTMUX" capture)"
 assert_contains "smart run targeted active pane" "NO_TARGET_AUTO_PANE" "$CAPTURED_AUTO"
 
+# 6c. Capture flags & logs alias
+CAPTURED_N="$("$MTMUX" capture -n 10)"
+assert_contains "capture with -n 10" "NO_TARGET_AUTO_PANE" "$CAPTURED_N"
+
+LOGS_OUT="$("$MTMUX" logs "${AGENT_SESS}:0.0" -n 10)"
+assert_contains "mtmux logs alias reads output" "POSIX_VERIFY_12345" "$LOGS_OUT"
+
+TMP_FILE="$REPO_ROOT/tmp/ci_cap_$$.txt"
+assert_zero "capture to file with -o" "$MTMUX" capture "${AGENT_SESS}:0.0" -o "$TMP_FILE"
+assert_contains "captured file contains output" "POSIX_VERIFY_12345" "$(cat "$TMP_FILE")"
+rm -f "$TMP_FILE"
+
+# 6d. Inspection hierarchy and JSON serialization
+INSPECT_JSON="$("$MTMUX" inspect --json)"
+assert_contains "inspect --json contains session" "$AGENT_SESS" "$INSPECT_JSON"
+assert_contains "inspect --json contains coordinator role" "coordinator" "$INSPECT_JSON"
+assert_contains "inspect --json contains worker-1 role" "worker-1" "$INSPECT_JSON"
+
+# 6e. Session snapshot persistence (save & restore)
+SAVE_JSON="$REPO_ROOT/tmp/ci_save_$$.json"
+assert_zero "save sessions snapshot" "$MTMUX" save "$SAVE_JSON"
+assert_contains "saved snapshot contains session" "$AGENT_SESS" "$(cat "$SAVE_JSON")"
+
+assert_zero "kill session before restore test" "$MTMUX" kill "$AGENT_SESS"
+assert_zero "restore sessions snapshot" "$MTMUX" restore "$SAVE_JSON"
+
+RESTORED_PANES="$(tmux list-panes -t "$AGENT_SESS" | wc -l | tr -d ' ')"
+assert_eq "restored session has 3 panes" "3" "$RESTORED_PANES"
+rm -f "$SAVE_JSON"
+
+# 6f. Shell completion generation
+COMP_BASH="$("$MTMUX" completion bash)"
+assert_contains "completion bash contains handler" "complete -F _mtmux_completions mtmux" "$COMP_BASH"
+
+COMP_ZSH="$("$MTMUX" completion zsh)"
+assert_contains "completion zsh contains header" "#compdef mtmux" "$COMP_ZSH"
+
+COMP_PWSH="$("$MTMUX" completion powershell)"
+assert_contains "completion powershell contains completer" "Register-ArgumentCompleter" "$COMP_PWSH"
+
+# 6g. Inspect hierarchical tree output
+INSPECT_TREE="$("$MTMUX" inspect)"
+assert_contains "inspect tree contains session" "Session" "$INSPECT_TREE"
+assert_contains "inspect tree contains window" "Window" "$INSPECT_TREE"
+assert_contains "inspect tree contains pane" "Pane" "$INSPECT_TREE"
+
 # 7. Teardown
 assert_zero "kill session $SESS" "$MTMUX" kill "$SESS"
 assert_zero "kill session $AGENT_SESS" "$MTMUX" kill "$AGENT_SESS"

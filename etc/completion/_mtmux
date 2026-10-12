@@ -1,0 +1,64 @@
+#compdef mtmux
+# Zsh completion for mtmux
+# Place in $fpath (e.g. ~/.zsh/completion/_mtmux or /usr/local/share/zsh/site-functions/_mtmux)
+
+_mtmux() {
+    local -a subcommands
+    subcommands=(
+        'new:Create a new session'
+        'attach:Attach to session (alias: a)'
+        'a:Attach to session'
+        'list:List active sessions (alias: ls)'
+        'ls:List active sessions'
+        'kill:Kill session or --all'
+        'agent:Spawn an AI agent panel (agy, claude, grok, gemini, aider)'
+        'split:Split current window horizontally or vertically'
+        'layout:Apply layout preset (agents, dev, split, vsplit, quad)'
+        'run:Send command to pane'
+        'capture:Capture pane content'
+        'logs:View or dump pane logs'
+        'switch:Switch between sessions'
+        'inspect:Inspect session/window/pane hierarchy (--json)'
+        'save:Save session snapshot to JSON'
+        'restore:Restore sessions from JSON'
+        'theme:Switch or list visual color theme'
+        'doctor:Run diagnostics'
+        'completion:Generate shell completion'
+        'help:Show help and usage'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe -t commands 'mtmux subcommand' subcommands
+        return 0
+    fi
+
+    case "$words[2]" in
+        attach|a|kill|switch|inspect|run|capture|logs)
+            local -a sessions
+            sessions=(${(f)"$(tmux list-sessions -F '#{session_name}' 2>/dev/null)"})
+            _describe -t sessions 'session' sessions
+            ;;
+        layout)
+            local -a layouts
+            layouts=(agents dev split vsplit quad)
+            _describe -t layouts 'layout' layouts
+            ;;
+        theme)
+            local -a themes
+            themes=(catppuccin-mocha tokyo-night nord gruvbox-dark dracula one-dark list)
+            _describe -t themes 'theme' themes
+            ;;
+        agent)
+            local -a agents
+            agents=(agy claude grok gemini aider)
+            _describe -t agents 'agent' agents
+            ;;
+        completion)
+            local -a shells
+            shells=(bash zsh powershell)
+            _describe -t shells 'shell' shells
+            ;;
+    esac
+}
+
+_mtmux "$@"

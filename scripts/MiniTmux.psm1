@@ -156,6 +156,35 @@ function Test-MiniTmux {
     & $Script:MtmuxPs1 doctor
 }
 
+function Switch-MiniTmuxSession {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0)]
+        [string]$Name
+    )
+
+    if ($Name) {
+        & $Script:MtmuxPs1 switch $Name
+    } else {
+        & $Script:MtmuxPs1 switch
+    }
+}
+
+function Get-MiniTmuxInspect {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0)]
+        [string]$Session,
+
+        [switch]$Json
+    )
+
+    $callArgs = @('inspect')
+    if ($Session) { $callArgs += $Session }
+    if ($Json) { $callArgs += '--json' }
+    & $Script:MtmuxPs1 @callArgs
+}
+
 function Register-MiniTmuxCompletions {
     [CmdletBinding()]
     param()
@@ -164,7 +193,7 @@ function Register-MiniTmuxCompletions {
         $completerBlock = {
             param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
 
-            $subcommands = @('new', 'attach', 'a', 'list', 'ls', 'kill', 'layout', 'run', 'capture', 'save', 'restore', 'theme', 'themes', 'doctor', 'setup', 'wt')
+            $subcommands = @('new', 'attach', 'a', 'list', 'ls', 'kill', 'agent', 'split', 'layout', 'run', 'capture', 'logs', 'switch', 'inspect', 'save', 'restore', 'theme', 'themes', 'doctor', 'setup', 'wt', 'completion', 'help')
             $layouts = @('dev', 'split', 'vsplit', 'quad', 'agents')
             $elements = $commandAst.Elements
             
@@ -175,7 +204,7 @@ function Register-MiniTmuxCompletions {
             }
 
             $subcmd = $elements[1].Extent.Text
-            if ($subcmd -in @('attach', 'a', 'kill', 'run', 'capture', 'wt')) {
+            if ($subcmd -in @('attach', 'a', 'kill', 'switch', 'inspect', 'run', 'capture', 'logs', 'wt')) {
                 $sessions = & $Script:TmuxExe list-sessions -F "#{session_name}" 2>$null
                 if ($sessions) {
                     return ($sessions | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
@@ -199,10 +228,24 @@ function Register-MiniTmuxCompletions {
                     })
                 }
             }
+
+            if ($subcmd -eq 'agent') {
+                $agents = @('agy', 'claude', 'grok', 'gemini', 'aider', '-v', '-h', '-t')
+                return ($agents | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Agent / tool: $_")
+                })
+            }
+
+            if ($subcmd -eq 'completion') {
+                return (@('powershell', 'bash', 'zsh') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Shell: $_")
+                })
+            }
         }
 
         Register-ArgumentCompleter -Native -CommandName 'mtmux' -ScriptBlock $completerBlock
         Register-ArgumentCompleter -Native -CommandName 'mtmux.cmd' -ScriptBlock $completerBlock
+        Register-ArgumentCompleter -Native -CommandName 'mtmux.ps1' -ScriptBlock $completerBlock
     }
 }
 
@@ -215,6 +258,8 @@ Export-ModuleMember -Function `
     Remove-MiniTmuxSession, `
     Send-MiniTmuxKeys, `
     Get-MiniTmuxPane, `
+    Switch-MiniTmuxSession, `
+    Get-MiniTmuxInspect, `
     Save-MiniTmuxSession, `
     Restore-MiniTmuxSession, `
     Get-MiniTmuxTheme, `

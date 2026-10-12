@@ -243,9 +243,70 @@ Assert-Check "mtmux restore recreates saved session and panes" $restoreOk
 if (Test-Path $snapFile) { Remove-Item -Path $snapFile -Force }
 
 # -----------------------------------------------------------------------------
-# 10. Clean Teardown
+# 10. Inspection & Hierarchy (JSON Serialization)
 # -----------------------------------------------------------------------------
-Write-Host "`n[Group 10] Server Teardown & Process Hygiene" -ForegroundColor Yellow
+Write-Host "`n[Group 10] Inspection Hierarchy & JSON Schema" -ForegroundColor Yellow
+
+& $MtmuxPs1 new inspect_sess -d
+& $MtmuxPs1 layout agents -Name inspect_sess
+[void](Wait-Condition { (& $TmuxPs1 has-session -t inspect_sess 2>$null); $LASTEXITCODE -eq 0 } 500)
+
+$inspectJson = (& $MtmuxPs1 inspect inspect_sess --json 2>&1) | Out-String
+Assert-Check "mtmux inspect --json returns structured JSON" ($inspectJson -match 'coordinator' -and $inspectJson -match 'worker-1')
+
+$inspectTree = (& $MtmuxPs1 inspect inspect_sess 2>&1) | Out-String
+Assert-Check "mtmux inspect renders tree hierarchy" ($inspectTree -match 'Session' -and $inspectTree -match 'Window')
+
+& $MtmuxPs1 kill inspect_sess
+
+# -----------------------------------------------------------------------------
+# 11. Shell Completion Generation
+# -----------------------------------------------------------------------------
+Write-Host "`n[Group 11] Shell Completion Generation" -ForegroundColor Yellow
+
+$compPwsh = (& $MtmuxPs1 completion powershell 2>&1) | Out-String
+Assert-Check "mtmux completion powershell contains completer block" ($compPwsh -match 'Register-ArgumentCompleter')
+
+$compBash = (& $MtmuxPs1 completion bash 2>&1) | Out-String
+Assert-Check "mtmux completion bash contains function definition" ($compBash -match '_mtmux_completions')
+
+$compZsh = (& $MtmuxPs1 completion zsh 2>&1) | Out-String
+Assert-Check "mtmux completion zsh contains definition" ($compZsh -match '_mtmux')
+
+# -----------------------------------------------------------------------------
+# 12. Batch Fast-Paths & Automation Module
+# -----------------------------------------------------------------------------
+Write-Host "`n[Group 12] Batch Fast-Paths & MiniTmux Module" -ForegroundColor Yellow
+
+# Test bin\mtmux.cmd fast-path execution
+& cmd.exe /c "`"$MtmuxCmd`" new cmd_sess -d"
+$cmdSessOk = Wait-Condition { (& $TmuxPs1 has-session -t cmd_sess 2>$null); $LASTEXITCODE -eq 0 } 1000
+Assert-Check "bin\mtmux.cmd fast-path creates detached session" $cmdSessOk
+
+$cmdLs = (& cmd.exe /c "`"$MtmuxCmd`" ls" 2>&1) | Out-String
+Assert-Check "bin\mtmux.cmd ls shows running session" ($cmdLs -match 'cmd_sess')
+
+& cmd.exe /c "`"$MtmuxCmd`" run cmd_sess:0.0 `"echo BATCH_FAST_PATH_OK`""
+$batchCapOk = Wait-Condition {
+    $out = (& cmd.exe /c "`"$MtmuxCmd`" capture cmd_sess:0.0 -n 10" 2>&1) | Out-String
+    $out -match 'BATCH_FAST_PATH_OK'
+} 1500
+Assert-Check "bin\mtmux.cmd run and capture verify I/O roundtrip" $batchCapOk
+
+& cmd.exe /c "`"$MtmuxCmd`" kill cmd_sess"
+
+# Test MiniTmux.psm1 module cmdlets
+$modulePath = Join-Path $RootDir 'scripts\MiniTmux.psm1'
+Import-Module $modulePath -Force
+Assert-Check "Import-Module MiniTmux succeeds" ($null -ne (Get-Module -Name MiniTmux))
+
+$sessionsCmdlet = Get-MiniTmuxSession
+Assert-Check "Get-MiniTmuxSession executes without errors" ($null -ne $sessionsCmdlet -or $sessionsCmdlet.Count -eq 0)
+
+# -----------------------------------------------------------------------------
+# 13. Clean Teardown
+# -----------------------------------------------------------------------------
+Write-Host "`n[Group 13] Server Teardown & Process Hygiene" -ForegroundColor Yellow
 
 & $MtmuxPs1 kill --all
 [void](Wait-Condition { -not (Get-Process -Name "*tmux*" -ErrorAction SilentlyContinue) } 500)

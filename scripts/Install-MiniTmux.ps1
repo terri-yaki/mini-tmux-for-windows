@@ -39,6 +39,13 @@ if ($Uninstall) {
         Write-Host "  PASS  Removed Windows Terminal profile fragment" -ForegroundColor Green
     }
 
+    # Remove from PowerShell PROFILE
+    if (Test-Path $PROFILE) {
+        $pLines = Get-Content $PROFILE | Where-Object { $_ -notmatch 'mtmux' }
+        Set-Content -Path $PROFILE -Value $pLines -Force
+        Write-Host "  PASS  Removed completions from PowerShell PROFILE" -ForegroundColor Green
+    }
+
     Write-Host "`nMiniTmux environment uninstalled successfully." -ForegroundColor Green
     return
 }
@@ -76,6 +83,25 @@ if (-not $SkipTerminalProfile) {
     if (Test-Path $wtScript) {
         & $wtScript
     }
+}
+
+# 3. PowerShell Tab Completion Registration
+try {
+    $profileDir = Split-Path -Parent $PROFILE
+    if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
+    $compFile = Join-Path $RootDir 'etc\completion\mtmux.ps1'
+    if (Test-Path $compFile) {
+        $compLine = ". `"$compFile`""
+        $profileContent = if (Test-Path $PROFILE) { Get-Content $PROFILE -Raw } else { "" }
+        if ($profileContent -notmatch 'mtmux\.ps1') {
+            Add-Content -Path $PROFILE -Value "`n# MiniTmux shell completion`n$compLine" -Force
+            Write-Host "  PASS  Registered PowerShell tab completion in `$PROFILE" -ForegroundColor Green
+        } else {
+            Write-Host "  PASS  PowerShell tab completion already registered" -ForegroundColor Green
+        }
+    }
+} catch {
+    # Non-fatal if profile is restricted
 }
 
 Write-Host "`n================================================================" -ForegroundColor DarkCyan

@@ -37,7 +37,16 @@ else
 fi
 
 TMUX_CONF="$MINITMUX_ROOT/etc/tmux.conf"
+export TMUX_CONF
 THEMES_DIR="$MINITMUX_ROOT/etc/themes"
+PYTHON_BIN="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+
+# Set MSYS runtime performance and globbing flags on Windows environments
+case "$(uname -s 2>/dev/null)" in
+    CYGWIN*|MINGW*|MSYS*)
+        export MSYS="${MSYS:-noglob disable_pcon winsymlinks:nativestrict}"
+        ;;
+esac
 
 # ANSI Colors
 C_RESET=$'\033[0m'
@@ -63,19 +72,25 @@ ${C_CYAN}${C_BOLD}MiniTmux - Terminal Multiplexer CLI${C_RESET}
 ${C_GRAY}Repository: ${MINITMUX_ROOT}${C_RESET}
 
 ${C_YELLOW}USAGE:${C_RESET}
-    mtmux                     Attach to 'main' session, or create it if not running
-    mtmux new [name] [-d]     Create a new session (default: 'main')
-    mtmux attach [name]       Attach to an existing session (alias: 'a')
-    mtmux list | ls           List running sessions with formatted status
-    mtmux kill [name|--all]   Terminate a session or kill the entire server
-    mtmux agent [name] [-v]   Add an AI agent panel (agy, debugger, code-reviewer, etc.)
-    mtmux split [-v] [cmd]    Split current window horizontally or vertically with optional cmd
-    mtmux layout <preset>     Launch or configure a structured layout (dev, split, quad, agents)
-    mtmux run <target> <cmd>  Send a command to a pane and execute it (-n for raw keys)
-    mtmux capture <target>    Capture and print visible pane content
-    mtmux theme [name|list]   List or switch visual color theme
-    mtmux doctor              Run diagnostic checks on tmux and environment
-    mtmux -- [raw args...]    Direct pass-through to tmux
+    mtmux                           Attach to 'main' session, or create it if not running
+    mtmux new [name] [-d]           Create a new session (default: 'main')
+    mtmux attach [name]             Attach to an existing session (alias: 'a')
+    mtmux list | ls                 List running sessions with formatted status
+    mtmux switch [session]          Interactively or directly switch between active sessions
+    mtmux kill [name|--all]         Terminate a session or kill the entire server
+    mtmux agent [name|tool] [-v]    Add an AI agent panel (agy, claude, grok, gemini, aider)
+    mtmux split [-v] [cmd]          Split current window horizontally or vertically with optional cmd
+    mtmux layout <preset>           Launch or configure a structured layout (agents, dev, split, quad)
+    mtmux run [target] [-n] <cmd>   Send a command to a pane and execute it (-n for raw keys)
+    mtmux capture [target] [-n]     Capture pane content (-n lines, -a all, -o file)
+    mtmux logs [target] [-n]        Alias for capture (view or dump pane logs)
+    mtmux inspect [session] [-j]    Inspect sessions/windows/panes hierarchy (--json for raw)
+    mtmux save [file]               Save running sessions and layout snapshots to JSON
+    mtmux restore [file]            Restore sessions and layouts from JSON snapshot
+    mtmux theme [name|list]         List or switch visual color theme
+    mtmux doctor                    Run diagnostic checks on tmux and environment
+    mtmux completion [shell]        Generate shell completion (bash, zsh, powershell)
+    mtmux -- [raw args...]          Direct pass-through to tmux
 
 ${C_YELLOW}LAYOUT PRESETS:${C_RESET}
     ${C_GREEN}agents${C_RESET}   3-pane multi-agent layout (Coordinator left 55%, 2 Workers stacked right 45%)
@@ -89,8 +104,12 @@ ${C_YELLOW}THEMES:${C_RESET}
 
 ${C_YELLOW}EXAMPLES:${C_RESET}
     mtmux layout agents -Name ai-team
+    mtmux agent claude -v -t ai-team
     mtmux run ai-team:0.0 "git status"
-    mtmux capture ai-team:0.0
+    mtmux logs ai-team:0.0 -n 30
+    mtmux inspect --json
+    mtmux save my_workspace.json
+    mtmux switch
     mtmux theme tokyo-night
 EOF
 }
@@ -248,21 +267,28 @@ cmd_agent() {
             -h|--horizontal) dir="-h" ;;
             -v|--vertical) dir="-v" ;;
             -t|--target) target="$2"; shift ;;
-            *) [ -z "$agent_name" ] && agent_name="$1" ;;
+            *) if [ -z "$agent_name" ]; then agent_name="$1"; fi ;;
         esac
         shift
     done
     
     if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
         run_tmux new-session -d -s main
-        [ -z "$target" ] && target="main"
+        if [ -z "$target" ]; then target="main"; fi
     fi
     
     local cmd="agy"
     if [ -n "$agent_name" ]; then
-        cmd="agy --agent $agent_name"
+        case "$agent_name" in
+            claude|grok|gemini|aider|codex)
+                cmd="$agent_name"
+                ;;
+            *)
+                cmd="agy --agent $agent_name"
+                ;;
+        esac
     fi
-    local shell_cmd="$cmd; exec \${SHELL:-/bin/zsh}"
+    local shell_cmd="$cmd; exec \${SHELL:-bash}"
     
     if [ -n "$target" ]; then
         run_tmux split-window "$dir" -t "$target" "$shell_cmd"
@@ -289,17 +315,523 @@ cmd_split() {
     
     if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
         run_tmux new-session -d -s main
-        [ -z "$target" ] && target="main"
+        if [ -z "$target" ]; then target="main"; fi
     fi
     
     local split_args=("$dir")
-    [ -n "$target" ] && split_args+=("-t" "$target")
+    if [ -n "$target" ]; then
+        split_args+=("-t" "$target")
+    fi
     if [ -n "$custom_cmd" ]; then
-        split_args+=("$custom_cmd; exec \${SHELL:-/bin/zsh}")
+        split_args+=("$custom_cmd; exec \${SHELL:-bash}")
     fi
     
     run_tmux split-window "${split_args[@]}"
     echo -e "${C_GREEN}Added pane ($dir)${C_RESET}"
+}
+
+cmd_capture() {
+    local target=""
+    local lines=50
+    local all_history=0
+    local outfile=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -n|--lines)
+                lines="$2"
+                shift 2
+                ;;
+            -a|--all)
+                all_history=1
+                shift
+                ;;
+            -o|--output)
+                outfile="$2"
+                shift 2
+                ;;
+            -*)
+                shift
+                ;;
+            *)
+                if [ -z "$target" ]; then
+                    target="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    local cap_args=("-p")
+    if [ -n "$target" ]; then
+        cap_args+=("-t" "$target")
+    fi
+
+    if [ "$all_history" -eq 1 ]; then
+        cap_args+=("-S" "-")
+    else
+        cap_args+=("-S" "-$lines")
+    fi
+
+    if [ -n "$outfile" ]; then
+        "$TMUX_BIN" capture-pane "${cap_args[@]}" > "$outfile"
+        echo -e "${C_GREEN}Captured pane output to '$outfile'.${C_RESET}"
+    else
+        "$TMUX_BIN" capture-pane "${cap_args[@]}"
+    fi
+}
+
+cmd_switch() {
+    local target="${1:-}"
+
+    if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
+        echo -e "${C_GRAY}No active tmux sessions found.${C_RESET}"
+        return 0
+    fi
+
+    local sessions=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && sessions+=("$line")
+    done < <("$TMUX_BIN" list-sessions -F "#{session_name}" 2>/dev/null)
+
+    if [ ${#sessions[@]} -eq 0 ]; then
+        echo -e "${C_GRAY}No active tmux sessions found.${C_RESET}"
+        return 0
+    fi
+
+    if [ -n "$target" ]; then
+        if [ -n "$TMUX" ]; then
+            "$TMUX_BIN" switch-client -t "$target"
+        else
+            run_tmux attach-session -t "$target"
+        fi
+        return $?
+    fi
+
+    # Interactive switcher
+    if command -v fzf >/dev/null 2>&1 && [ -t 0 ]; then
+        local chosen
+        chosen="$("$TMUX_BIN" list-sessions -F "#{session_name} (#{session_windows} windows, created #{session_created_string})#{?session_attached, [attached],}" | fzf --reverse --header="Select MiniTmux Session" --prompt="Session > " | awk '{print $1}')"
+        if [ -n "$chosen" ]; then
+            if [ -n "$TMUX" ]; then
+                "$TMUX_BIN" switch-client -t "$chosen"
+            else
+                run_tmux attach-session -t "$chosen"
+            fi
+        fi
+        return 0
+    fi
+
+    echo -e "${C_CYAN}${C_BOLD}MiniTmux Active Sessions:${C_RESET}"
+    local i=1
+    for s in "${sessions[@]}"; do
+        local details
+        details="$("$TMUX_BIN" list-sessions -F "#{session_windows} windows, created #{session_created_string}#{?session_attached, [attached],}" -f "#{==:#{session_name},$s}" 2>/dev/null || true)"
+        echo -e "  [${C_GREEN}$i${C_RESET}] ${C_BOLD}$s${C_RESET} ($details)"
+        i=$((i + 1))
+    done
+
+    if [ ! -t 0 ]; then
+        target="${sessions[0]}"
+    else
+        read -r -p "Select session (1-${#sessions[@]}) or 'q' to cancel: " choice
+        case "$choice" in
+            [1-9]*)
+                local idx=$((choice - 1))
+                if [ $idx -ge 0 ] && [ $idx -lt ${#sessions[@]} ]; then
+                    target="${sessions[$idx]}"
+                else
+                    echo "Invalid selection."
+                    return 1
+                fi
+                ;;
+            q|Q|*)
+                return 0
+                ;;
+        esac
+    fi
+
+    if [ -n "$TMUX" ]; then
+        "$TMUX_BIN" switch-client -t "$target"
+    else
+        run_tmux attach-session -t "$target"
+    fi
+}
+
+cmd_inspect() {
+    local target=""
+    local as_json=0
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json|-j) as_json=1 ;;
+            *) [ -z "$target" ] && target="$1" ;;
+        esac
+        shift
+    done
+
+    if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
+        if [ "$as_json" -eq 1 ]; then
+            echo "[]"
+        else
+            echo -e "${C_GRAY}No active sessions running.${C_RESET}"
+        fi
+        return 0
+    fi
+
+    local raw_data
+    local query_args=("list-panes" "-a" "-F" "#{session_name}|#{window_index}|#{window_name}|#{pane_index}|#{pane_id}|#{pane_width}x#{pane_height}|#{pane_current_command}|#{pane_current_path}|#{@role}")
+    if [ -n "$target" ]; then
+        query_args=("list-panes" "-t" "$target" "-F" "#{session_name}|#{window_index}|#{window_name}|#{pane_index}|#{pane_id}|#{pane_width}x#{pane_height}|#{pane_current_command}|#{pane_current_path}|#{@role}")
+    fi
+
+    raw_data="$("$TMUX_BIN" "${query_args[@]}")"
+
+    if [ "$as_json" -eq 1 ]; then
+        if [ -z "$PYTHON_BIN" ]; then
+            echo -e "${C_RED}Python 3 is required for JSON output.${C_RESET}" >&2
+            return 1
+        fi
+        "$PYTHON_BIN" -c '
+import sys, json
+
+lines = sys.stdin.read().strip().splitlines()
+panes = []
+for line in lines:
+    parts = line.split("|")
+    if len(parts) < 8:
+        continue
+    panes.append({
+        "session": parts[0],
+        "window_index": int(parts[1]),
+        "window_name": parts[2],
+        "pane_index": int(parts[3]),
+        "pane_id": parts[4],
+        "dimensions": parts[5],
+        "current_command": parts[6],
+        "path": parts[7],
+        "role": parts[8] if len(parts) > 8 and parts[8] else "default"
+    })
+print(json.dumps(panes, indent=2))
+' <<< "$raw_data"
+    else
+        echo -e "${C_CYAN}${C_BOLD}MiniTmux Inspection Hierarchy:${C_RESET}"
+        local last_s=""
+        local last_w=""
+        while IFS="|" read -r s w_idx w_name p_idx p_id dims cmd path role; do
+            [ -z "$s" ] && continue
+            if [ "$s" != "$last_s" ]; then
+                echo -e " Session ${C_BOLD}${C_GREEN}$s${C_RESET}"
+                last_s="$s"
+                last_w=""
+            fi
+            if [ "$w_idx" != "$last_w" ]; then
+                echo -e "   └── Window [${C_YELLOW}$w_idx${C_RESET}] '${w_name}'"
+                last_w="$w_idx"
+            fi
+            local role_str=""
+            [ -n "$role" ] && role_str=" ${C_CYAN}(role: $role)${C_RESET}"
+            echo -e "         └── Pane [${C_BLUE}$p_idx${C_RESET}] ${p_id} ${dims} cmd:${C_BOLD}$cmd${C_RESET}$role_str [${path}]"
+        done <<< "$raw_data"
+    fi
+}
+
+cmd_save() {
+    local target_file="${1:-$MINITMUX_ROOT/tmp/saved_sessions.json}"
+    if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
+        echo -e "${C_YELLOW}No running tmux sessions to save.${C_RESET}"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$target_file")" 2>/dev/null || true
+    local raw_info
+    raw_info="$("$TMUX_BIN" list-panes -a -F '#{session_name}|#{window_index}|#{window_name}|#{window_layout}|#{pane_index}|#{pane_current_path}')"
+
+    if [ -z "$PYTHON_BIN" ]; then
+        echo -e "${C_RED}Python 3 is required to save session snapshots.${C_RESET}" >&2
+        return 1
+    fi
+
+    "$PYTHON_BIN" -c '
+import sys, json, datetime
+
+raw = sys.stdin.read().strip().splitlines()
+sessions = {}
+for line in raw:
+    parts = line.split("|")
+    if len(parts) < 6:
+        continue
+    s_name, w_idx, w_name, w_layout, p_idx, p_path = parts[0], int(parts[1]), parts[2], parts[3], int(parts[4]), parts[5]
+    if s_name not in sessions:
+        sessions[s_name] = {"Name": s_name, "Windows": {}}
+    sess = sessions[s_name]
+    if w_idx not in sess["Windows"]:
+        sess["Windows"][w_idx] = {
+            "Index": w_idx,
+            "Name": w_name,
+            "Layout": w_layout,
+            "Panes": []
+        }
+    sess["Windows"][w_idx]["Panes"].append({
+        "Index": p_idx,
+        "Path": p_path
+    })
+
+session_list = []
+for s_name, sess in sessions.items():
+    win_list = [sess["Windows"][k] for k in sorted(sess["Windows"].keys())]
+    session_list.append({
+        "Name": s_name,
+        "Windows": win_list
+    })
+
+data = {
+    "Version": 1,
+    "SavedAt": datetime.datetime.now().isoformat(),
+    "Sessions": session_list
+}
+
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+
+print(f"  PASS  Saved {len(session_list)} session(s) snapshot to: {sys.argv[1]}")
+' "$target_file" <<< "$raw_info"
+}
+
+cmd_restore() {
+    local target_file="${1:-$MINITMUX_ROOT/tmp/saved_sessions.json}"
+    if [ ! -f "$target_file" ]; then
+        echo -e "${C_RED}Snapshot file not found: $target_file${C_RESET}"
+        return 1
+    fi
+
+    if [ -z "$PYTHON_BIN" ]; then
+        echo -e "${C_RED}Python 3 is required to restore session snapshots.${C_RESET}" >&2
+        return 1
+    fi
+
+    "$PYTHON_BIN" -c '
+import sys, json, subprocess
+
+target_file = sys.argv[1]
+tmux_bin = sys.argv[2]
+with open(target_file, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+sessions = data.get("Sessions", [])
+if not sessions:
+    print("No sessions found in snapshot.")
+    sys.exit(0)
+
+restored_count = 0
+for sess in sessions:
+    s_name = sess["Name"]
+    res = subprocess.run([tmux_bin, "has-session", "-t", s_name], capture_output=True)
+    if res.returncode == 0:
+        print(f"  WARN  Session \"{s_name}\" already running. Skipping.")
+        continue
+
+    print(f"Restoring session \"{s_name}\"...")
+    windows = sess.get("Windows", [])
+    if not windows:
+        continue
+
+    first_win = windows[0]
+    first_path = first_win["Panes"][0]["Path"] if first_win.get("Panes") else ""
+    cmd = [tmux_bin, "new-session", "-d", "-s", s_name, "-n", first_win["Name"]]
+    if first_path:
+        cmd.extend(["-c", first_path])
+    subprocess.run(cmd)
+
+    w0_idx = first_win["Index"]
+    w0_target = f"{s_name}:{w0_idx}"
+    for p in first_win.get("Panes", [])[1:]:
+        p_path = p.get("Path", "")
+        split_cmd = [tmux_bin, "split-window", "-t", w0_target]
+        if p_path:
+            split_cmd.extend(["-c", p_path])
+        subprocess.run(split_cmd)
+    if first_win.get("Layout"):
+        subprocess.run([tmux_bin, "select-layout", "-t", w0_target, first_win["Layout"]], capture_output=True)
+
+    for win in windows[1:]:
+        w_idx = win["Index"]
+        w_target = f"{s_name}:{w_idx}"
+        w_path = win["Panes"][0]["Path"] if win.get("Panes") else ""
+        win_cmd = [tmux_bin, "new-window", "-d", "-t", w_target, "-n", win["Name"]]
+        if w_path:
+            win_cmd.extend(["-c", w_path])
+        subprocess.run(win_cmd)
+
+        for p in win.get("Panes", [])[1:]:
+            p_path = p.get("Path", "")
+            split_cmd = [tmux_bin, "split-window", "-t", w_target]
+            if p_path:
+                split_cmd.extend(["-c", p_path])
+            subprocess.run(split_cmd)
+        if win.get("Layout"):
+            subprocess.run([tmux_bin, "select-layout", "-t", w_target, win["Layout"]], capture_output=True)
+
+    restored_count += 1
+    print(f"  PASS  Restored session \"{s_name}\" ({len(windows)} windows)")
+
+print(f"Successfully restored {restored_count} session(s).")
+' "$target_file" "$TMUX_BIN"
+}
+
+cmd_completion() {
+    local shell_type="${1:-bash}"
+    case "$shell_type" in
+        bash)
+            cat <<'BASH_COMPLETION'
+_mtmux_completions() {
+    local cur prev
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    local subcommands="new attach a list ls kill agent split layout run capture logs switch inspect save restore theme themes doctor completion"
+    local layouts="agents dev split vsplit quad"
+
+    if [ "$COMP_CWORD" -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "$subcommands" -- "$cur") )
+        return 0
+    fi
+
+    local subcmd="${COMP_WORDS[1]}"
+    case "$subcmd" in
+        attach|a|kill|switch|inspect|run|capture|logs)
+            local sessions
+            sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$sessions" -- "$cur") )
+            ;;
+        layout)
+            COMPREPLY=( $(compgen -W "$layouts" -- "$cur") )
+            ;;
+        theme)
+            local themes="catppuccin-mocha tokyo-night nord gruvbox-dark dracula one-dark list"
+            COMPREPLY=( $(compgen -W "$themes" -- "$cur") )
+            ;;
+        agent)
+            local agent_tools="agy claude grok gemini aider -v -h"
+            COMPREPLY=( $(compgen -W "$agent_tools" -- "$cur") )
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh powershell" -- "$cur") )
+            ;;
+    esac
+}
+complete -F _mtmux_completions mtmux
+BASH_COMPLETION
+            ;;
+        zsh)
+            cat <<'ZSH_COMPLETION'
+#compdef mtmux
+
+_mtmux() {
+    local -a subcommands
+    subcommands=(
+        'new:Create a new session'
+        'attach:Attach to session (alias: a)'
+        'a:Attach to session'
+        'list:List active sessions (alias: ls)'
+        'ls:List active sessions'
+        'kill:Kill session or --all'
+        'agent:Spawn an AI agent panel'
+        'split:Split current window'
+        'layout:Apply layout preset (agents, dev, split, vsplit, quad)'
+        'run:Send command to pane'
+        'capture:Capture pane content'
+        'logs:View or dump pane logs'
+        'switch:Switch between sessions'
+        'inspect:Inspect session/window/pane hierarchy (--json)'
+        'save:Save session snapshot to JSON'
+        'restore:Restore sessions from JSON'
+        'theme:Switch or list visual color theme'
+        'doctor:Run diagnostics'
+        'completion:Generate shell completion'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe -t commands 'mtmux subcommand' subcommands
+        return 0
+    fi
+
+    case "$words[2]" in
+        attach|a|kill|switch|inspect|run|capture|logs)
+            local -a sessions
+            sessions=(${(f)"$(tmux list-sessions -F '#{session_name}' 2>/dev/null)"})
+            _describe -t sessions 'session' sessions
+            ;;
+        layout)
+            local -a layouts
+            layouts=(agents dev split vsplit quad)
+            _describe -t layouts 'layout' layouts
+            ;;
+        theme)
+            local -a themes
+            themes=(catppuccin-mocha tokyo-night nord gruvbox-dark dracula one-dark list)
+            _describe -t themes 'theme' themes
+            ;;
+        agent)
+            local -a agents
+            agents=(agy claude grok gemini aider)
+            _describe -t agents 'agent' agents
+            ;;
+        completion)
+            local -a shells
+            shells=(bash zsh powershell)
+            _describe -t shells 'shell' shells
+            ;;
+    esac
+}
+_mtmux "$@"
+ZSH_COMPLETION
+            ;;
+        powershell|pwsh)
+            cat <<'PWSH_COMPLETION'
+Register-ArgumentCompleter -Native -CommandName 'mtmux' -ScriptBlock {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    $subcommands = @('new', 'attach', 'a', 'list', 'ls', 'kill', 'agent', 'split', 'layout', 'run', 'capture', 'logs', 'switch', 'inspect', 'save', 'restore', 'theme', 'themes', 'doctor', 'setup', 'wt', 'completion')
+    $layouts = @('dev', 'split', 'vsplit', 'quad', 'agents')
+    $elements = $commandAst.Elements
+    if ($elements.Count -le 2) {
+        return ($subcommands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "MiniTmux subcommand: $_")
+        })
+    }
+    $subcmd = $elements[1].Extent.Text
+    if ($subcmd -in @('attach', 'a', 'kill', 'switch', 'inspect', 'run', 'capture', 'logs', 'wt')) {
+        $sessions = tmux list-sessions -F "#{session_name}" 2>$null
+        if ($sessions) {
+            return ($sessions | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Session: $_")
+            })
+        }
+    }
+    if ($subcmd -eq 'layout') {
+        return ($layouts | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Layout preset: $_")
+        })
+    }
+    if ($subcmd -eq 'theme') {
+        $themes = @('catppuccin-mocha', 'tokyo-night', 'nord', 'gruvbox-dark', 'dracula', 'one-dark', 'list')
+        return ($themes | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Theme: $_")
+        })
+    }
+    if ($subcmd -eq 'completion') {
+        return (@('bash', 'zsh', 'powershell') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', "Shell: $_")
+        })
+    }
+}
+PWSH_COMPLETION
+            ;;
+        *)
+            echo "Usage: mtmux completion [bash|zsh|powershell]" >&2
+            return 1
+            ;;
+    esac
 }
 
 # Subcommand dispatch
@@ -403,7 +935,7 @@ case "$SUBCMD" in
         CMD="$*"
         if [ -z "$CMD" ]; then
             echo -e "${C_YELLOW}Usage: mtmux run [target] [-n] <command>${C_RESET}"
-            return 1
+            exit 1
         fi
 
         if [ -n "$TARGET" ]; then
@@ -418,16 +950,35 @@ case "$SUBCMD" in
             fi
         fi
         ;;
-    capture)
+    capture|logs)
         shift
-        TARGET="${1:-0}"
-        "$TMUX_BIN" capture-pane -p -t "$TARGET"
+        cmd_capture "$@"
         ;;
-    theme)
+    switch)
+        shift
+        cmd_switch "$@"
+        ;;
+    inspect)
+        shift
+        cmd_inspect "$@"
+        ;;
+    save)
+        shift
+        cmd_save "$@"
+        ;;
+    restore)
+        shift
+        cmd_restore "$@"
+        ;;
+    completion)
+        shift
+        cmd_completion "$@"
+        ;;
+    theme|themes)
         shift
         cmd_theme "$@"
         ;;
-    doctor)
+    doctor|diag)
         cmd_doctor
         ;;
     help|--help|-h)
