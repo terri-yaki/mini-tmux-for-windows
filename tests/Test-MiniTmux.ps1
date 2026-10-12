@@ -167,6 +167,19 @@ $utf8Ok = Wait-Condition {
 } 1500
 Assert-Check "Terminal input/output command roundtrip" $utf8Ok
 
+# Smart run without target
+& $MtmuxPs1 run "echo SMART_RUN_NO_TARGET"
+$smartRunOk = Wait-Condition {
+    $out = (& $MtmuxPs1 capture -n 10 2>&1) | Out-String
+    $out -match 'SMART_RUN_NO_TARGET'
+} 1500
+Assert-Check "mtmux run <cmd> targets active pane without target" $smartRunOk
+
+# Dynamic split & agent panel
+& $MtmuxPs1 split -h -t io_sess
+$paneSplitCount = (& $TmuxPs1 list-panes -t io_sess | Measure-Object).Count
+Assert-Check "mtmux split adds pane to session" ($paneSplitCount -ge 2)
+
 & $MtmuxPs1 kill io_sess
 
 # -----------------------------------------------------------------------------

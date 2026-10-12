@@ -107,6 +107,12 @@ sleep 0.5
 CAPTURED="$("$MTMUX" capture "${AGENT_SESS}:0.0")"
 assert_contains "capture pane verified command output" "POSIX_VERIFY_12345" "$CAPTURED"
 
+# 6b. Run without target argument (smart active pane detection)
+assert_zero "run command without target argument" "$MTMUX" run "echo NO_TARGET_AUTO_PANE"
+sleep 0.5
+CAPTURED_AUTO="$("$MTMUX" capture)"
+assert_contains "smart run targeted active pane" "NO_TARGET_AUTO_PANE" "$CAPTURED_AUTO"
+
 # 7. Teardown
 assert_zero "kill session $SESS" "$MTMUX" kill "$SESS"
 assert_zero "kill session $AGENT_SESS" "$MTMUX" kill "$AGENT_SESS"

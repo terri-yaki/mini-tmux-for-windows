@@ -640,22 +640,83 @@ switch ($action) {
     'themes' {
         Show-Themes
     }
+    'agent' {
+        $agentName = ""
+        $dir = "-h"
+        $target = ""
+        for ($i = 1; $i -lt $args.Count; $i++) {
+            if ($args[$i] -eq "-v" -or $args[$i] -eq "--vertical") { $dir = "-v" }
+            elseif ($args[$i] -eq "-h" -or $args[$i] -eq "--horizontal") { $dir = "-h" }
+            elseif ($args[$i] -eq "-t" -and ($i + 1) -lt $args.Count) { $target = $args[$i + 1]; $i++ }
+            elseif (-not $agentName) { $agentName = $args[$i] }
+        }
+        $cmd = if ($agentName) { "agy --agent $agentName" } else { "agy" }
+        $splitArgs = @("split-window", $dir)
+        if ($target) { $splitArgs += @("-t", $target) }
+        $splitArgs += "$cmd; exec bash"
+        Invoke-TmuxDirect $splitArgs
+        Write-Host "Spawned agent panel with '$cmd'" -ForegroundColor Green
+    }
+    'split' {
+        $dir = "-h"
+        $target = ""
+        $customCmd = ""
+        for ($i = 1; $i -lt $args.Count; $i++) {
+            if ($args[$i] -eq "-v" -or $args[$i] -eq "--vertical") { $dir = "-v" }
+            elseif ($args[$i] -eq "-h" -or $args[$i] -eq "--horizontal") { $dir = "-h" }
+            elseif ($args[$i] -eq "-t" -and ($i + 1) -lt $args.Count) { $target = $args[$i + 1]; $i++ }
+            else { $customCmd = ($args[$i..($args.Count - 1)]) -join ' '; break }
+        }
+        $splitArgs = @("split-window", $dir)
+        if ($target) { $splitArgs += @("-t", $target) }
+        if ($customCmd) { $splitArgs += "$customCmd; exec bash" }
+        Invoke-TmuxDirect $splitArgs
+        Write-Host "Added pane ($dir)" -ForegroundColor Green
+    }
     'run' {
-        if ($args.Count -lt 3) {
-            Write-Host "Usage: mtmux run <target> [--no-enter|-n] <command>" -ForegroundColor Yellow
+        if ($args.Count -lt 2) {
+            Write-Host "Usage: mtmux run [target] [--no-enter|-n] <command>" -ForegroundColor Yellow
             return
         }
-        $target = $args[1]
-        $noEnter = $false
-        $cmdIndex = 2
-        if ($args[2] -eq "--no-enter" -or $args[2] -eq "-n") {
-            $noEnter = $true
-            $cmdIndex = 3
+
+        # Ensure server/session exists
+        $hasSess = (& $TmuxExe list-sessions 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            & $TmuxExe new-session -d -s main
         }
+
+        $target = ""
+        $noEnter = $false
+        $cmdIndex = 1
+
+        if ($args[1] -eq "--no-enter" -or $args[1] -eq "-n") {
+            $noEnter = $true
+            $cmdIndex = 2
+        } elseif ($args.Count -ge 3 -and ($args[1] -match '^[a-zA-Z0-9_.-]+:[0-9]' -or $args[1] -match '^%[0-9]+' -or ((& $TmuxExe has-session -t $args[1] 2>&1); $LASTEXITCODE -eq 0))) {
+            $target = $args[1]
+            $cmdIndex = 2
+            if ($args.Count -gt 2 -and ($args[2] -eq "--no-enter" -or $args[2] -eq "-n")) {
+                $noEnter = $true
+                $cmdIndex = 3
+            }
+        }
+
         $command = ($args[$cmdIndex..($args.Count - 1)]) -join ' '
-        & $TmuxExe send-keys -t $target -l $command
-        if (-not $noEnter) {
-            & $TmuxExe send-keys -t $target Enter
+        if ([string]::IsNullOrWhiteSpace($command)) {
+            Write-Host "Usage: mtmux run [target] [--no-enter|-n] <command>" -ForegroundColor Yellow
+            return
+        }
+
+        if ($target) {
+            & $TmuxExe send-keys -t $target -l $command
+            if (-not $noEnter) {
+                & $TmuxExe send-keys -t $target Enter
+            }
+        } else {
+            & $TmuxExe send-keys -l $command
+            if (-not $noEnter) {
+                & $TmuxExe send-keys Enter
+            }
         }
     }
     'capture' {

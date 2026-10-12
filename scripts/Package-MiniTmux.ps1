@@ -84,6 +84,7 @@ $itemsToCompress = @(
     (Join-Path $RootDir 'README.md'),
     (Join-Path $RootDir 'LICENSE'),
     (Join-Path $RootDir 'mtmux.cmd'),
+    (Join-Path $RootDir 'mtmux'),
     (Join-Path $RootDir 'tmux.cmd'),
     (Join-Path $RootDir '.gitignore')
 )

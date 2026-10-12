@@ -150,17 +150,36 @@ echo Applied theme '!THEME_NAME!'.
 exit /b 0
 
 :do_run
-set "TARGET=%~2"
 shift
-shift
+set "TARGET="
 set "NO_ENTER=0"
 if "%~1"=="--no-enter" (
     set "NO_ENTER=1"
     shift
-) else if "%~1"=="-n" (
+)
+if "%~1"=="-n" (
     set "NO_ENTER=1"
     shift
 )
+
+:: If at least two arguments remain, check if %~1 is a target (has colon, %, or known session)
+if not "%~2"=="" (
+    echo %~1 | findstr /R /C:":[0-9]" /C:"^%%[0-9]" >nul 2>&1
+    if not errorlevel 1 (
+        set "TARGET=%~1"
+        shift
+    )
+)
+
+if "%~1"=="--no-enter" (
+    set "NO_ENTER=1"
+    shift
+)
+if "%~1"=="-n" (
+    set "NO_ENTER=1"
+    shift
+)
+
 set "CMD_TEXT="
 :run_loop
 if "%~1"=="" goto :run_exec
@@ -171,10 +190,29 @@ if "!CMD_TEXT!"=="" (
 )
 shift
 goto :run_loop
+
 :run_exec
-"%TMUX_EXE%" -u send-keys -t "!TARGET!" -l "!CMD_TEXT!"
-if "!NO_ENTER!"=="0" (
-    "%TMUX_EXE%" -u send-keys -t "!TARGET!" Enter
+if "!CMD_TEXT!"=="" (
+    echo Usage: mtmux run [target] [-n] ^<command^>
+    exit /b 1
+)
+
+:: Ensure session exists
+"%TMUX_EXE%" -u has-session >nul 2>&1
+if errorlevel 1 (
+    "%TMUX_EXE%" -u new-session -d -s main
+)
+
+if not "!TARGET!"=="" (
+    "%TMUX_EXE%" -u send-keys -t "!TARGET!" -l "!CMD_TEXT!"
+    if "!NO_ENTER!"=="0" (
+        "%TMUX_EXE%" -u send-keys -t "!TARGET!" Enter
+    )
+) else (
+    "%TMUX_EXE%" -u send-keys -l "!CMD_TEXT!"
+    if "!NO_ENTER!"=="0" (
+        "%TMUX_EXE%" -u send-keys Enter
+    )
 )
 exit /b 0
 

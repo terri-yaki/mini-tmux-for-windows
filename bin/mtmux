@@ -372,18 +372,48 @@ case "$SUBCMD" in
         ;;
     run)
         shift
-        TARGET="$1"
-        shift
+        # Ensure tmux server/session exists
+        if ! "$TMUX_BIN" ls >/dev/null 2>&1; then
+            run_tmux new-session -d -s main
+        fi
+
+        TARGET=""
         NO_ENTER=0
+
         if [ "$1" = "-n" ] || [ "$1" = "--no-enter" ]; then
             NO_ENTER=1
             shift
         fi
+
+        # If at least 2 arguments remain and $1 is a valid tmux target
+        if [ $# -ge 2 ]; then
+            if [[ "$1" =~ ^[a-zA-Z0-9_.-]+:[0-9] ]] || [[ "$1" =~ ^%[0-9]+ ]] || "$TMUX_BIN" display-message -p -t "$1" '#{pane_id}' >/dev/null 2>&1; then
+                TARGET="$1"
+                shift
+            fi
+        fi
+
+        if [ "$1" = "-n" ] || [ "$1" = "--no-enter" ]; then
+            NO_ENTER=1
+            shift
+        fi
+
         CMD="$*"
-        if [ "$NO_ENTER" -eq 1 ]; then
-            "$TMUX_BIN" send-keys -t "$TARGET" "$CMD"
+        if [ -z "$CMD" ]; then
+            echo -e "${C_YELLOW}Usage: mtmux run [target] [-n] <command>${C_RESET}"
+            return 1
+        fi
+
+        if [ -n "$TARGET" ]; then
+            "$TMUX_BIN" send-keys -t "$TARGET" -l "$CMD"
+            if [ "$NO_ENTER" -eq 0 ]; then
+                "$TMUX_BIN" send-keys -t "$TARGET" C-m
+            fi
         else
-            "$TMUX_BIN" send-keys -t "$TARGET" "$CMD" C-m
+            "$TMUX_BIN" send-keys -l "$CMD"
+            if [ "$NO_ENTER" -eq 0 ]; then
+                "$TMUX_BIN" send-keys C-m
+            fi
         fi
         ;;
     capture)

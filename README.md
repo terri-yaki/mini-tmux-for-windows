@@ -88,9 +88,11 @@ USAGE:
     mtmux attach [name]       Attach to an existing session (alias: mtmux a)
     mtmux list | ls           List running sessions with window count and status
     mtmux kill [name|--all]   Terminate a specific session or kill the entire server
+    mtmux agent [name] [-v]   Add an AI agent panel (agy, debugger, code-reviewer, grok, etc.)
+    mtmux split [-v] [cmd]    Split current window horizontally or vertically with optional command
     mtmux layout <preset>     Apply a layout preset (dev, split, vsplit, quad, agents)
-    mtmux run <target> <cmd>  Send a command to a pane and execute it (use -n for raw keys)
-    mtmux capture <target>    Capture and print visible pane content to stdout
+    mtmux run [target] <cmd>  Send a command to a pane (defaults to active pane; -n for raw keys)
+    mtmux capture [target]    Capture and print visible pane content to stdout
     mtmux save [file]         Export running sessions, windows, and pane layouts to snapshot JSON
     mtmux restore [file]      Restore sessions, windows, and split geometry from snapshot
     mtmux theme [name|list]   List or switch visual theme (catppuccin, tokyonight, nord, etc.)
@@ -99,6 +101,29 @@ USAGE:
     mtmux wt [session]        Launch session in a new tab inside Windows Terminal
     mtmux -- <tmux-args...>   Forward raw arguments directly to tmux
 ```
+
+### ⚡ AI Agent Panel Spawning
+
+MiniTmux provides one-command shortcuts to spin up and orchestrate AI agent panes:
+
+```bash
+# Spawn an AI agent side panel running standard agy
+mtmux agent
+
+# Spawn a specialized agent panel
+mtmux agent debugger
+mtmux agent code-reviewer
+
+# Split vertically underneath
+mtmux agent test-runner -v
+
+# Run grok or any command directly in the active pane
+mtmux run "grok"
+```
+
+**Inside tmux keyboard shortcuts:**
+* `Ctrl + b` then `Shift + A` : Split horizontally (right) with AI agent
+* `Ctrl + b` then `Ctrl + a`  : Split vertically (down) with AI agent
 
 ### Session Persistence (Save & Restore)
 
