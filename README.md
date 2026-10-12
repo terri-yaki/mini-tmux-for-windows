@@ -235,7 +235,7 @@ Run `mtmux doctor` at any time to verify system integrity:
   PASS  Found usr\bin\tmux.exe
   PASS  Found usr\bin\bash.exe
   PASS  Found usr\bin\msys-2.0.dll
-  PASS  Found usr\bin\msys-event-2-1-7.dll
+  PASS  Found usr\bin\msys-event_core-2-1-7.dll
   PASS  Found usr\bin\msys-ncursesw6.dll
   PASS  Found etc\tmux.conf
 

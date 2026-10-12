@@ -115,7 +115,7 @@ function Show-Doctor {
         'usr\bin\tmux.exe',
         'usr\bin\bash.exe',
         'usr\bin\msys-2.0.dll',
-        'usr\bin\msys-event-2-1-7.dll',
+        'usr\bin\msys-event_core-2-1-7.dll',
         'usr\bin\msys-ncursesw6.dll',
         'etc\tmux.conf'
     )
